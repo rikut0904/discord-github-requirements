@@ -53,10 +53,56 @@ Bot をチャンネルに追加すると専用スレッドを自動生成し、�
 - **入力エラー (422)**: 入力内容の再確認を促す
 - **Rate Limit**: `X-RateLimit-Remaining` を監視し、残量が少ない場合に待機時間を提示
 
+## 技術スタック
+
+- 言語: Go
+- アーキテクチャ: クリーンアーキテクチャ
+- データベース: PostgreSQL
+- Discord SDK: discordgo
+
+## プロジェクト構造
+
+```
+├── cmd/bot/           # エントリーポイント
+├── internal/
+│   ├── domain/        # ドメイン層
+│   │   ├── entity/    # エンティティ
+│   │   └── repository/# リポジトリインターフェース
+│   ├── usecase/       # ユースケース層
+│   ├── infrastructure/# インフラ層
+│   │   ├── crypto/    # 暗号化
+│   │   ├── database/  # DB実装
+│   │   ├── discord/   # Discord
+│   │   └── github/    # GitHub API
+│   └── interface/     # インターフェース層
+│       └── handler/   # Discordハンドラー
+└── migrations/        # DBマイグレーション
+```
+
+## 環境変数
+
+| 変数名 | 説明 |
+|--------|------|
+| `DISCORD_TOKEN` | Discord Bot Token |
+| `DATABASE_URL` | PostgreSQL接続URL |
+| `ENCRYPTION_KEY` | AES暗号化キー（32バイト） |
+
+## セットアップ
+
+1. マイグレーション実行
+```bash
+psql $DATABASE_URL -f migrations/001_create_user_settings.sql
+```
+
+2. ビルド・実行
+```bash
+go build -o bot ./cmd/bot
+./bot
+```
+
 ## 今後の TODO
 
-1. Slash Command 実装（Discord Interaction Handler）
-2. GitHub API クライアントと Rate Limit 管理
-3. トークン保存基盤（KVS/DB）と暗号化処理
-4. 初期セットアップ用スレッド生成と通知チャンネル設定 UI
+1. `/assign` コマンド実装（詳細は ISSUE_ASSIGN.md を参照）
+2. 初期セットアップ用スレッド生成と通知チャンネル設定 UI
+3. Bot削除時のデータ即時消去
 
