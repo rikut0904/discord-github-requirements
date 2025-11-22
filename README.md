@@ -11,12 +11,12 @@ Discord 上で GitHub の Issues を取得・閲覧するための Bot。
 ### `/assign`
 - 登録ユーザーの PAT で GitHub API `/issues` を呼び出し、自分に割り当てられている Issue を横断取得。
 - 結果は Embed 形式で表示（タイトル、番号、ラベル、担当者、更新日時、URL など）。
-- `page` / `per` オプションでページング指定が可能。
+- ページ指定不要で全件を取得し、Discord の Embed 制限に合わせて複数メッセージに分割表示。
 
 ### `/issues`
 - GitHub API `/repos/{owner}/{repo}/issues` を利用し、指定したリポジトリの Issue を取得。
 - `repository` オプションで `owner/repo` を指定する（必須）。
-- `page` / `per` オプションでページング指定が可能。
+- ページ指定不要で全件を取得し、必要に応じて複数メッセージに分割表示。
 
 ### `/setting`
 - GitHub Personal Access Token をモーダルで登録/更新。

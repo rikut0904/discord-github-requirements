@@ -33,20 +33,6 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 		{
 			Name:        "assign",
 			Description: "自分に割り当てられた Issue を取得します",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "page",
-					Description: "ページ番号",
-					Required:    false,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "per",
-					Description: "1ページあたりの件数",
-					Required:    false,
-				},
-			},
 		},
 		{
 			Name:        "issues",
@@ -57,18 +43,6 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 					Name:        "repository",
 					Description: "owner/repo 形式で指定",
 					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "page",
-					Description: "ページ番号",
-					Required:    false,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "per",
-					Description: "1ページあたりの件数",
-					Required:    false,
 				},
 			},
 		},
@@ -183,18 +157,11 @@ func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.In
 
 func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
-	page := 1
-	perPage := 10
 	repoInput := ""
 
 	for _, opt := range options {
-		switch opt.Name {
-		case "repository":
+		if opt.Name == "repository" {
 			repoInput = opt.StringValue()
-		case "page":
-			page = int(opt.IntValue())
-		case "per":
-			perPage = int(opt.IntValue())
 		}
 	}
 
@@ -226,13 +193,6 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	owner := parts[0]
 	repo := parts[1]
 
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 || perPage > 100 {
-		perPage = 10
-	}
-
 	ctx := context.Background()
 	guildID := i.GuildID
 	channelID := i.ChannelID
@@ -243,7 +203,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 	})
 
-	issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo, page, perPage)
+	issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
 	if err != nil {
 		var message string
 		if err == usecase.ErrTokenNotFound {
@@ -274,7 +234,6 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		embeds = append(embeds, embed)
 	}
 
-	// Add rate limit info if low
 	var content string
 	if rateLimit != nil && rateLimit.Remaining < 10 {
 		content = fmt.Sprintf("⚠️ API Rate Limit 残り: %d (リセット: %s)",
@@ -282,33 +241,10 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 			rateLimit.ResetAt.Format("15:04:05"))
 	}
 
-	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: &content,
-		Embeds:  &embeds,
-	})
+	h.respondWithEmbeds(s, i, content, embeds)
 }
 
 func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	options := i.ApplicationCommandData().Options
-	page := 1
-	perPage := 10
-
-	for _, opt := range options {
-		switch opt.Name {
-		case "page":
-			page = int(opt.IntValue())
-		case "per":
-			perPage = int(opt.IntValue())
-		}
-	}
-
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 || perPage > 100 {
-		perPage = 10
-	}
-
 	ctx := context.Background()
 	guildID := i.GuildID
 	channelID := i.ChannelID
@@ -318,7 +254,7 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 	})
 
-	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID, page, perPage)
+	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID)
 	if err != nil {
 		var message string
 		if err == usecase.ErrTokenNotFound {
@@ -356,10 +292,42 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 			rateLimit.ResetAt.Format("15:04:05"))
 	}
 
+	h.respondWithEmbeds(s, i, content, embeds)
+}
+
+func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.InteractionCreate, content string, embeds []*discordgo.MessageEmbed) {
+	const maxEmbedsPerMessage = 10
+
+	if len(embeds) == 0 {
+		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content: &content,
+		})
+		return
+	}
+
+	firstEmbeds := embeds
+	if len(firstEmbeds) > maxEmbedsPerMessage {
+		firstEmbeds = embeds[:maxEmbedsPerMessage]
+	}
+
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &content,
-		Embeds:  &embeds,
+		Embeds:  &firstEmbeds,
 	})
+
+	for offset := maxEmbedsPerMessage; offset < len(embeds); offset += maxEmbedsPerMessage {
+		end := offset + maxEmbedsPerMessage
+		if end > len(embeds) {
+			end = len(embeds)
+		}
+		chunk := embeds[offset:end]
+		if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Embeds: chunk,
+		}); err != nil {
+			fmt.Printf("Failed to send followup message: %v\n", err)
+			break
+		}
+	}
 }
 
 func createIssueEmbed(issue github.Issue) *discordgo.MessageEmbed {
