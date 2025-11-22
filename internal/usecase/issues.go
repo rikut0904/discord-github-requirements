@@ -24,7 +24,7 @@ func NewIssuesUsecase(repo repository.UserSettingRepository, crypto *crypto.AESC
 
 var ErrTokenNotFound = errors.New("token not registered")
 
-func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelID, userID string, page, perPage int) ([]github.Issue, *github.RateLimitInfo, error) {
+func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {
 	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
 	if err != nil {
 		return nil, nil, err
@@ -39,10 +39,10 @@ func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelI
 	}
 
 	client := github.NewClient(token)
-	return client.GetAssignedIssues(page, perPage)
+	return client.GetAllAssignedIssues()
 }
 
-func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channelID, userID, owner, repo string, page, perPage int) ([]github.Issue, *github.RateLimitInfo, error) {
+func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channelID, userID, owner, repo string) ([]github.Issue, *github.RateLimitInfo, error) {
 	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
 	if err != nil {
 		return nil, nil, err
@@ -57,7 +57,7 @@ func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channe
 	}
 
 	client := github.NewClient(token)
-	issues, rateLimit, err := client.GetRepositoryIssues(owner, repo, page, perPage)
+	issues, rateLimit, err := client.GetAllRepositoryIssues(owner, repo)
 	if issues != nil {
 		fullName := fmt.Sprintf("%s/%s", owner, repo)
 		for idx := range issues {

@@ -13,6 +13,8 @@ type Client struct {
 	token      string
 }
 
+const maxPerPage = 100
+
 type Issue struct {
 	Number     int         `json:"number"`
 	Title      string      `json:"title"`
@@ -151,6 +153,42 @@ func (c *Client) ValidateToken() error {
 	}
 
 	return nil
+}
+
+func (c *Client) GetAllAssignedIssues() ([]Issue, *RateLimitInfo, error) {
+	return c.collectAllIssues(func(page int) ([]Issue, *RateLimitInfo, error) {
+		return c.GetAssignedIssues(page, maxPerPage)
+	})
+}
+
+func (c *Client) GetAllRepositoryIssues(owner, repo string) ([]Issue, *RateLimitInfo, error) {
+	return c.collectAllIssues(func(page int) ([]Issue, *RateLimitInfo, error) {
+		return c.GetRepositoryIssues(owner, repo, page, maxPerPage)
+	})
+}
+
+func (c *Client) collectAllIssues(fetch func(page int) ([]Issue, *RateLimitInfo, error)) ([]Issue, *RateLimitInfo, error) {
+	var allIssues []Issue
+	var lastRateLimit *RateLimitInfo
+
+	for page := 1; ; page++ {
+		issues, rateLimit, err := fetch(page)
+		if err != nil {
+			return nil, rateLimit, err
+		}
+
+		if rateLimit != nil {
+			lastRateLimit = rateLimit
+		}
+
+		allIssues = append(allIssues, issues...)
+
+		if len(issues) < maxPerPage {
+			break
+		}
+	}
+
+	return allIssues, lastRateLimit, nil
 }
 
 func parseRateLimit(resp *http.Response) *RateLimitInfo {
