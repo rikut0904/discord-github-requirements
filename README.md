@@ -8,15 +8,15 @@ Discord 上で GitHub の Issues を取得・閲覧するための Bot。
 
 ## 主な機能
 
-### `/issues`
-- 登録ユーザーの PAT を用いて GitHub API `/issues` を呼び出し、ユーザーがアクセスできる全リポジトリの Issue を横断取得。
+### `/assign`
+- 登録ユーザーの PAT で GitHub API `/issues` を呼び出し、自分に割り当てられている Issue を横断取得。
 - 結果は Embed 形式で表示（タイトル、番号、ラベル、担当者、更新日時、URL など）。
 - `page` / `per` オプションでページング指定が可能。
 
-### `/assign`
-- GitHub API `/user/issues?filter=assigned` などを利用し、ユーザーに割り当てられた Issue のみを取得。
-- 所属 Organization のアサイン Issue も含む（この機能のみ Org 対応）。
-- 該当 Issue が無い場合は専用メッセージを返す。
+### `/issues`
+- GitHub API `/repos/{owner}/{repo}/issues` を利用し、指定したリポジトリの Issue を取得。
+- `repository` オプションで `owner/repo` を指定する（必須）。
+- `page` / `per` オプションでページング指定が可能。
 
 ### `/setting`
 - GitHub Personal Access Token をモーダルで登録/更新。
@@ -105,4 +105,3 @@ go build -o bot ./cmd/bot
 1. `/assign` コマンド実装（詳細は ISSUE_ASSIGN.md を参照）
 2. 初期セットアップ用スレッド生成と通知チャンネル設定 UI
 3. Bot削除時のデータ即時消去
-

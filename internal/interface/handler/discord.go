@@ -31,9 +31,33 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 			Description: "GitHub Personal Access Token を登録・更新します",
 		},
 		{
-			Name:        "issues",
-			Description: "GitHub Issues を取得します",
+			Name:        "assign",
+			Description: "自分に割り当てられた Issue を取得します",
 			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "page",
+					Description: "ページ番号",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "per",
+					Description: "1ページあたりの件数",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        "issues",
+			Description: "指定したリポジトリの Issue を取得します",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "repository",
+					Description: "owner/repo 形式で指定",
+					Required:    true,
+				},
 				{
 					Type:        discordgo.ApplicationCommandOptionInteger,
 					Name:        "page",
@@ -73,6 +97,8 @@ func (h *DiscordHandler) handleCommand(s *discordgo.Session, i *discordgo.Intera
 	switch i.ApplicationCommandData().Name {
 	case "setting":
 		h.handleSettingCommand(s, i)
+	case "assign":
+		h.handleAssignCommand(s, i)
 	case "issues":
 		h.handleIssuesCommand(s, i)
 	}
@@ -159,15 +185,46 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	options := i.ApplicationCommandData().Options
 	page := 1
 	perPage := 10
+	repoInput := ""
 
 	for _, opt := range options {
 		switch opt.Name {
+		case "repository":
+			repoInput = opt.StringValue()
 		case "page":
 			page = int(opt.IntValue())
 		case "per":
 			perPage = int(opt.IntValue())
 		}
 	}
+
+	if repoInput == "" {
+		message := "❌ repository は owner/repo 形式で指定してください。"
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: message,
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	parts := strings.Split(repoInput, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		message := "❌ repository は owner/repo 形式で指定してください。"
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: message,
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	owner := parts[0]
+	repo := parts[1]
 
 	if page < 1 {
 		page = 1
@@ -186,7 +243,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 	})
 
-	issues, rateLimit, err := h.issuesUsecase.GetIssues(ctx, guildID, channelID, userID, page, perPage)
+	issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo, page, perPage)
 	if err != nil {
 		var message string
 		if err == usecase.ErrTokenNotFound {
@@ -218,6 +275,80 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	// Add rate limit info if low
+	var content string
+	if rateLimit != nil && rateLimit.Remaining < 10 {
+		content = fmt.Sprintf("⚠️ API Rate Limit 残り: %d (リセット: %s)",
+			rateLimit.Remaining,
+			rateLimit.ResetAt.Format("15:04:05"))
+	}
+
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &content,
+		Embeds:  &embeds,
+	})
+}
+
+func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	options := i.ApplicationCommandData().Options
+	page := 1
+	perPage := 10
+
+	for _, opt := range options {
+		switch opt.Name {
+		case "page":
+			page = int(opt.IntValue())
+		case "per":
+			perPage = int(opt.IntValue())
+		}
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 100 {
+		perPage = 10
+	}
+
+	ctx := context.Background()
+	guildID := i.GuildID
+	channelID := i.ChannelID
+	userID := i.Member.User.ID
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+
+	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID, page, perPage)
+	if err != nil {
+		var message string
+		if err == usecase.ErrTokenNotFound {
+			message = "❌ トークンが登録されていません。`/setting` でトークンを登録してください。"
+		} else if ghErr, ok := err.(*github.GitHubError); ok {
+			message = fmt.Sprintf("❌ GitHub API エラー: %s", ghErr.Message)
+		} else {
+			message = "❌ Issue の取得に失敗しました"
+		}
+
+		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content: &message,
+		})
+		return
+	}
+
+	if len(issues) == 0 {
+		message := "📭 割り当てられた Issue は見つかりませんでした"
+		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content: &message,
+		})
+		return
+	}
+
+	embeds := make([]*discordgo.MessageEmbed, 0, len(issues))
+	for _, issue := range issues {
+		embed := createIssueEmbed(issue)
+		embeds = append(embeds, embed)
+	}
+
 	var content string
 	if rateLimit != nil && rateLimit.Remaining < 10 {
 		content = fmt.Sprintf("⚠️ API Rate Limit 残り: %d (リセット: %s)",

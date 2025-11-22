@@ -14,13 +14,13 @@ type Client struct {
 }
 
 type Issue struct {
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	HTMLURL   string    `json:"html_url"`
-	State     string    `json:"state"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Labels    []Label   `json:"labels"`
-	Assignees []User    `json:"assignees"`
+	Number     int         `json:"number"`
+	Title      string      `json:"title"`
+	HTMLURL    string      `json:"html_url"`
+	State      string      `json:"state"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+	Labels     []Label     `json:"labels"`
+	Assignees  []User      `json:"assignees"`
 	Repository *Repository `json:"repository"`
 }
 
@@ -58,8 +58,43 @@ func NewClient(token string) *Client {
 	}
 }
 
-func (c *Client) GetIssues(page, perPage int) ([]Issue, *RateLimitInfo, error) {
+func (c *Client) GetAssignedIssues(page, perPage int) ([]Issue, *RateLimitInfo, error) {
 	url := fmt.Sprintf("https://api.github.com/issues?page=%d&per_page=%d&state=open", page, perPage)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	rateLimit := parseRateLimit(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, rateLimit, &GitHubError{
+			StatusCode: resp.StatusCode,
+			Message:    getErrorMessage(resp.StatusCode),
+		}
+	}
+
+	var issues []Issue
+	if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
+		return nil, rateLimit, err
+	}
+
+	return issues, rateLimit, nil
+}
+
+func (c *Client) GetRepositoryIssues(owner, repo string, page, perPage int) ([]Issue, *RateLimitInfo, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues?page=%d&per_page=%d&state=open", owner, repo, page, perPage)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
