@@ -29,6 +29,24 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 		{
 			Name:        "setting",
 			Description: "GitHub Personal Access Token を登録・更新します",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "action",
+					Description: "設定の種類",
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "トークン設定",
+							Value: "token",
+						},
+						{
+							Name:  "除外リポジトリ設定",
+							Value: "exclude",
+						},
+					},
+				},
+			},
 		},
 		{
 			Name:        "assign",
@@ -79,6 +97,24 @@ func (h *DiscordHandler) handleCommand(s *discordgo.Session, i *discordgo.Intera
 }
 
 func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	options := i.ApplicationCommandData().Options
+	action := "token"
+
+	for _, opt := range options {
+		if opt.Name == "action" {
+			action = opt.StringValue()
+		}
+	}
+
+	switch action {
+	case "token":
+		h.showTokenModal(s, i)
+	case "exclude":
+		h.showExcludeModal(s, i)
+	}
+}
+
+func (h *DiscordHandler) showTokenModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
@@ -106,11 +142,57 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 	}
 }
 
-func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.ModalSubmitData().CustomID != "token_modal" {
-		return
+func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	guildID := i.GuildID
+	channelID := i.ChannelID
+	userID := i.Member.User.ID
+
+	currentExcludes, err := h.settingUsecase.GetExcludedRepositories(ctx, guildID, channelID, userID)
+	if err != nil {
+		fmt.Printf("Error getting excluded repositories: %v\n", err)
+		currentExcludes = []string{}
 	}
 
+	excludeText := strings.Join(currentExcludes, "\n")
+
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: "exclude_modal",
+			Title:    "除外リポジトリ設定",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "exclude_input",
+							Label:       "除外するリポジトリ (owner/repo形式、1行に1つ)",
+							Style:       discordgo.TextInputParagraph,
+							Placeholder: "owner1/repo1\nowner2/repo2",
+							Required:    false,
+							Value:       excludeText,
+							MaxLength:   4000,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		fmt.Printf("Error responding with modal: %v\n", err)
+	}
+}
+
+func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	switch i.ModalSubmitData().CustomID {
+	case "token_modal":
+		h.handleTokenModalSubmit(s, i)
+	case "exclude_modal":
+		h.handleExcludeModalSubmit(s, i)
+	}
+}
+
+func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	var token string
 	for _, comp := range i.ModalSubmitData().Components {
 		if row, ok := comp.(*discordgo.ActionsRow); ok {
@@ -150,6 +232,75 @@ func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.In
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content: "✅ GitHub Token を登録しました",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	var excludeText string
+	for _, comp := range i.ModalSubmitData().Components {
+		if row, ok := comp.(*discordgo.ActionsRow); ok {
+			for _, rowComp := range row.Components {
+				if input, ok := rowComp.(*discordgo.TextInput); ok && input.CustomID == "exclude_input" {
+					excludeText = input.Value
+				}
+			}
+		}
+	}
+
+	ctx := context.Background()
+	guildID := i.GuildID
+	channelID := i.ChannelID
+	userID := i.Member.User.ID
+
+	var repositories []string
+	if excludeText != "" {
+		lines := strings.Split(excludeText, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				parts := strings.Split(line, "/")
+				if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+					message := fmt.Sprintf("❌ 不正な形式のリポジトリ名があります: %s\n正しい形式: owner/repo", line)
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: message,
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+					return
+				}
+				repositories = append(repositories, line)
+			}
+		}
+	}
+
+	err := h.settingUsecase.SaveExcludedRepositories(ctx, guildID, channelID, userID, repositories)
+	if err != nil {
+		message := "❌ 除外リポジトリの保存に失敗しました"
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: message,
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	var message string
+	if len(repositories) == 0 {
+		message = "✅ 除外リポジトリをクリアしました"
+	} else {
+		message = fmt.Sprintf("✅ %d件のリポジトリを除外リストに設定しました", len(repositories))
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: message,
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	})

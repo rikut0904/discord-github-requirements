@@ -39,7 +39,14 @@ func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelI
 	}
 
 	client := github.NewClient(token)
-	return client.GetAllAssignedIssues()
+	issues, rateLimit, err := client.GetAllAssignedIssues()
+	if err != nil {
+		return nil, rateLimit, err
+	}
+
+	// Apply excluded repositories filter
+	filteredIssues := u.filterExcludedRepositories(issues, setting.ExcludedRepositories)
+	return filteredIssues, rateLimit, nil
 }
 
 func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channelID, userID, owner, repo string) ([]github.Issue, *github.RateLimitInfo, error) {
@@ -67,4 +74,28 @@ func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channe
 		}
 	}
 	return issues, rateLimit, err
+}
+
+func (u *IssuesUsecase) filterExcludedRepositories(issues []github.Issue, excludedRepos []string) []github.Issue {
+	if len(excludedRepos) == 0 {
+		return issues
+	}
+
+	excludeMap := make(map[string]bool)
+	for _, repo := range excludedRepos {
+		excludeMap[repo] = true
+	}
+
+	var filtered []github.Issue
+	for _, issue := range issues {
+		if issue.Repository != nil {
+			if !excludeMap[issue.Repository.FullName] {
+				filtered = append(filtered, issue)
+			}
+		} else {
+			filtered = append(filtered, issue)
+		}
+	}
+
+	return filtered
 }

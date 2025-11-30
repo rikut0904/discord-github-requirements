@@ -57,3 +57,34 @@ func (u *SettingUsecase) GetToken(ctx context.Context, guildID, channelID, userI
 
 	return u.crypto.Decrypt(setting.EncryptedToken)
 }
+
+func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, channelID, userID string, repositories []string) error {
+	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+	if err != nil {
+		return err
+	}
+	if setting == nil {
+		setting = &entity.UserSetting{
+			GuildID:   guildID,
+			ChannelID: channelID,
+			UserID:    userID,
+		}
+	}
+
+	setting.ExcludedRepositories = repositories
+	setting.UpdatedAt = time.Now()
+
+	return u.repo.Save(ctx, setting)
+}
+
+func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, channelID, userID string) ([]string, error) {
+	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if setting == nil {
+		return []string{}, nil
+	}
+
+	return setting.ExcludedRepositories, nil
+}
