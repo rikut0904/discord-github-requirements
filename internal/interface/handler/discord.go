@@ -317,7 +317,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if repoInput == "" {
-		message := "❌ repository は owner/repo 形式で指定してください。"
+		message := "❌ repository は owner/repo 形式、または all を指定してください。"
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -327,22 +327,6 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		})
 		return
 	}
-
-	parts := strings.Split(repoInput, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		message := "❌ repository は owner/repo 形式で指定してください。"
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: message,
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
-	}
-
-	owner := parts[0]
-	repo := parts[1]
 
 	ctx := context.Background()
 	guildID := i.GuildID
@@ -354,7 +338,29 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 	})
 
-	issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
+	var issues []github.Issue
+	var rateLimit *github.RateLimitInfo
+	var err error
+
+	if strings.ToLower(repoInput) == "all" {
+		// Get all repositories' issues
+		issues, rateLimit, err = h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+	} else {
+		// Get specific repository issues
+		parts := strings.Split(repoInput, "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			message := "❌ repository は owner/repo 形式、または all を指定してください。"
+			s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Content: &message,
+			})
+			return
+		}
+
+		owner := parts[0]
+		repo := parts[1]
+		issues, rateLimit, err = h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
+	}
+
 	if err != nil {
 		var message string
 		if err == usecase.ErrTokenNotFound {
