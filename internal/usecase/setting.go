@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github-discord-bot/internal/domain/entity"
@@ -58,7 +59,12 @@ func (u *SettingUsecase) GetToken(ctx context.Context, guildID, channelID, userI
 	return u.crypto.Decrypt(setting.EncryptedToken)
 }
 
-func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, channelID, userID string, repositories []string) error {
+func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, channelID, userID string, repositories []string, commandType string) error {
+	// Validate commandType
+	if commandType != "issues" && commandType != "assign" {
+		return fmt.Errorf("invalid commandType: %s (must be 'issues' or 'assign')", commandType)
+	}
+
 	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
 	if err != nil {
 		return err
@@ -71,13 +77,23 @@ func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, 
 		}
 	}
 
-	setting.ExcludedRepositories = repositories
+	if commandType == "issues" {
+		setting.ExcludedIssuesRepositories = repositories
+	} else if commandType == "assign" {
+		setting.ExcludedAssignRepositories = repositories
+	}
+
 	setting.UpdatedAt = time.Now()
 
 	return u.repo.Save(ctx, setting)
 }
 
-func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, channelID, userID string) ([]string, error) {
+func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, channelID, userID string, commandType string) ([]string, error) {
+	// Validate commandType
+	if commandType != "issues" && commandType != "assign" {
+		return nil, fmt.Errorf("invalid commandType: %s (must be 'issues' or 'assign')", commandType)
+	}
+
 	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
 	if err != nil {
 		return nil, err
@@ -86,5 +102,11 @@ func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, c
 		return []string{}, nil
 	}
 
-	return setting.ExcludedRepositories, nil
+	if commandType == "issues" {
+		return setting.ExcludedIssuesRepositories, nil
+	} else if commandType == "assign" {
+		return setting.ExcludedAssignRepositories, nil
+	}
+
+	return []string{}, nil
 }

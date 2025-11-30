@@ -41,8 +41,12 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 							Value: "token",
 						},
 						{
-							Name:  "除外リポジトリ設定",
-							Value: "exclude",
+							Name:  "/issues用 除外リポジトリ設定",
+							Value: "exclude_issues",
+						},
+						{
+							Name:  "/assign用 除外リポジトリ設定",
+							Value: "exclude_assign",
 						},
 					},
 				},
@@ -109,8 +113,10 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 	switch action {
 	case "token":
 		h.showTokenModal(s, i)
-	case "exclude":
-		h.showExcludeModal(s, i)
+	case "exclude_issues":
+		h.showExcludeModal(s, i, "issues")
+	case "exclude_assign":
+		h.showExcludeModal(s, i, "assign")
 	}
 }
 
@@ -142,13 +148,13 @@ func (h *DiscordHandler) showTokenModal(s *discordgo.Session, i *discordgo.Inter
 	}
 }
 
-func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) {
 	ctx := context.Background()
 	guildID := i.GuildID
 	channelID := i.ChannelID
 	userID := i.Member.User.ID
 
-	currentExcludes, err := h.settingUsecase.GetExcludedRepositories(ctx, guildID, channelID, userID)
+	currentExcludes, err := h.settingUsecase.GetExcludedRepositories(ctx, guildID, channelID, userID, commandType)
 	if err != nil {
 		fmt.Printf("Error getting excluded repositories: %v\n", err)
 		currentExcludes = []string{}
@@ -156,11 +162,20 @@ func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.Int
 
 	excludeText := strings.Join(currentExcludes, "\n")
 
+	var title, customID string
+	if commandType == "issues" {
+		title = "/issues用 除外リポジトリ設定"
+		customID = "exclude_issues_modal"
+	} else {
+		title = "/assign用 除外リポジトリ設定"
+		customID = "exclude_assign_modal"
+	}
+
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: "exclude_modal",
-			Title:    "除外リポジトリ設定",
+			CustomID: customID,
+			Title:    title,
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
@@ -187,8 +202,10 @@ func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.In
 	switch i.ModalSubmitData().CustomID {
 	case "token_modal":
 		h.handleTokenModalSubmit(s, i)
-	case "exclude_modal":
-		h.handleExcludeModalSubmit(s, i)
+	case "exclude_issues_modal":
+		h.handleExcludeModalSubmit(s, i, "issues")
+	case "exclude_assign_modal":
+		h.handleExcludeModalSubmit(s, i, "assign")
 	}
 }
 
@@ -237,7 +254,7 @@ func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discord
 	})
 }
 
-func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) {
 	var excludeText string
 	for _, comp := range i.ModalSubmitData().Components {
 		if row, ok := comp.(*discordgo.ActionsRow); ok {
@@ -276,7 +293,7 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 		}
 	}
 
-	err := h.settingUsecase.SaveExcludedRepositories(ctx, guildID, channelID, userID, repositories)
+	err := h.settingUsecase.SaveExcludedRepositories(ctx, guildID, channelID, userID, repositories, commandType)
 	if err != nil {
 		message := "❌ 除外リポジトリの保存に失敗しました"
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -290,10 +307,15 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 	}
 
 	var message string
+	commandName := "issues"
+	if commandType == "assign" {
+		commandName = "assign"
+	}
+
 	if len(repositories) == 0 {
-		message = "✅ 除外リポジトリをクリアしました"
+		message = fmt.Sprintf("✅ /%s用の除外リポジトリをクリアしました", commandName)
 	} else {
-		message = fmt.Sprintf("✅ %d件のリポジトリを除外リストに設定しました", len(repositories))
+		message = fmt.Sprintf("✅ /%s用に%d件のリポジトリを除外リストに設定しました", commandName, len(repositories))
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
