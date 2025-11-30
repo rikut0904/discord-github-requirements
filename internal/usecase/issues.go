@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github-discord-bot/internal/domain/repository"
 	"github-discord-bot/internal/infrastructure/crypto"
@@ -44,8 +45,12 @@ func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelI
 		return nil, rateLimit, err
 	}
 
-	// Apply excluded repositories filter
-	filteredIssues := u.filterExcludedRepositories(issues, setting.ExcludedRepositories)
+	// Apply excluded repositories filter for assign command
+	excludedRepos := setting.ExcludedAssignRepositories
+	if excludedRepos == nil {
+		excludedRepos = []string{}
+	}
+	filteredIssues := u.filterExcludedRepositories(issues, excludedRepos)
 	return filteredIssues, rateLimit, nil
 }
 
@@ -98,10 +103,16 @@ func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, c
 		return nil, rateLimit, err
 	}
 
+	// Use issues command excluded repositories
+	excludedRepos := setting.ExcludedIssuesRepositories
+	if excludedRepos == nil {
+		excludedRepos = []string{}
+	}
+
 	var allIssues []github.Issue
 	for _, repo := range repos {
 		// Skip excluded repositories using pattern matching
-		if isRepositoryExcluded(repo.FullName, setting.ExcludedRepositories) {
+		if isRepositoryExcluded(repo.FullName, excludedRepos) {
 			continue
 		}
 
