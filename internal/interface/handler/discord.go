@@ -114,9 +114,9 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 	case "token":
 		h.showTokenModal(s, i)
 	case "exclude_issues":
-		h.showExcludeModal(s, i, "issues")
+		h.showExcludeModal(s, i, CommandTypeIssues)
 	case "exclude_assign":
-		h.showExcludeModal(s, i, "assign")
+		h.showExcludeModal(s, i, CommandTypeAssign)
 	}
 }
 
@@ -124,13 +124,13 @@ func (h *DiscordHandler) showTokenModal(s *discordgo.Session, i *discordgo.Inter
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: "token_modal",
+			CustomID: ModalIDToken,
 			Title:    "GitHub Token 設定",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
-							CustomID:    "token_input",
+							CustomID:    InputIDToken,
 							Label:       "GitHub Personal Access Token",
 							Style:       discordgo.TextInputShort,
 							Placeholder: "ghp_xxxxxxxxxxxx",
@@ -163,12 +163,12 @@ func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.Int
 	excludeText := strings.Join(currentExcludes, "\n")
 
 	var title, customID string
-	if commandType == "issues" {
+	if commandType == CommandTypeIssues {
 		title = "/issues用 除外リポジトリ設定"
-		customID = "exclude_issues_modal"
+		customID = ModalIDExcludeIssues
 	} else {
 		title = "/assign用 除外リポジトリ設定"
-		customID = "exclude_assign_modal"
+		customID = ModalIDExcludeAssign
 	}
 
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -180,7 +180,7 @@ func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.Int
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
-							CustomID:    "exclude_input",
+							CustomID:    InputIDExclude,
 							Label:       "除外パターン (1行に1つ)",
 							Style:       discordgo.TextInputParagraph,
 							Placeholder: "owner/repo (特定リポジトリ)\nowner/* (organization全体)\nowner (owner/*と同じ)",
@@ -200,12 +200,12 @@ func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.Int
 
 func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.ModalSubmitData().CustomID {
-	case "token_modal":
+	case ModalIDToken:
 		h.handleTokenModalSubmit(s, i)
-	case "exclude_issues_modal":
-		h.handleExcludeModalSubmit(s, i, "issues")
-	case "exclude_assign_modal":
-		h.handleExcludeModalSubmit(s, i, "assign")
+	case ModalIDExcludeIssues:
+		h.handleExcludeModalSubmit(s, i, CommandTypeIssues)
+	case ModalIDExcludeAssign:
+		h.handleExcludeModalSubmit(s, i, CommandTypeAssign)
 	}
 }
 
@@ -214,7 +214,7 @@ func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discord
 	for _, comp := range i.ModalSubmitData().Components {
 		if row, ok := comp.(*discordgo.ActionsRow); ok {
 			for _, rowComp := range row.Components {
-				if input, ok := rowComp.(*discordgo.TextInput); ok && input.CustomID == "token_input" {
+				if input, ok := rowComp.(*discordgo.TextInput); ok && input.CustomID == InputIDToken {
 					token = input.Value
 				}
 			}
@@ -230,9 +230,9 @@ func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discord
 	if err != nil {
 		var message string
 		if ghErr, ok := err.(*github.GitHubError); ok {
-			message = fmt.Sprintf("❌ トークンの検証に失敗しました: %s", ghErr.Message)
+			message = fmt.Sprintf(MsgTokenValidationFailed, ghErr.Message)
 		} else {
-			message = "❌ トークンの保存に失敗しました"
+			message = MsgTokenSaveFailed
 		}
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -248,7 +248,7 @@ func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discord
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content: "✅ GitHub Token を登録しました",
+			Content: MsgTokenSaved,
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	})
@@ -259,7 +259,7 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 	for _, comp := range i.ModalSubmitData().Components {
 		if row, ok := comp.(*discordgo.ActionsRow); ok {
 			for _, rowComp := range row.Components {
-				if input, ok := rowComp.(*discordgo.TextInput); ok && input.CustomID == "exclude_input" {
+				if input, ok := rowComp.(*discordgo.TextInput); ok && input.CustomID == InputIDExclude {
 					excludeText = input.Value
 				}
 			}
@@ -278,7 +278,7 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 			line = strings.TrimSpace(line)
 			if line != "" {
 				if !isValidExcludePattern(line) {
-					message := fmt.Sprintf("❌ 不正な形式があります: %s\n正しい形式:\n- owner/repo (特定リポジトリ)\n- owner/* (organization全体)\n- owner (owner/*と同じ)", line)
+					message := fmt.Sprintf(MsgInvalidExcludePattern, line)
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -295,7 +295,7 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 
 	err := h.settingUsecase.SaveExcludedRepositories(ctx, guildID, channelID, userID, repositories, commandType)
 	if err != nil {
-		message := "❌ 除外リポジトリの保存に失敗しました"
+		message := MsgExcludeSaveFailed
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -307,15 +307,15 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 	}
 
 	var message string
-	commandName := "issues"
-	if commandType == "assign" {
-		commandName = "assign"
+	commandName := CommandTypeIssues
+	if commandType == CommandTypeAssign {
+		commandName = CommandTypeAssign
 	}
 
 	if len(repositories) == 0 {
-		message = fmt.Sprintf("✅ /%s用の除外リポジトリをクリアしました", commandName)
+		message = fmt.Sprintf(MsgExcludeCleared, commandName)
 	} else {
-		message = fmt.Sprintf("✅ /%s用に%d件のリポジトリを除外リストに設定しました", commandName, len(repositories))
+		message = fmt.Sprintf(MsgExcludeSaved, commandName, len(repositories))
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -338,7 +338,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if repoInput == "" {
-		message := "❌ repository は owner/repo 形式、または all を指定してください。"
+		message := MsgInvalidRepoFormat
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -370,7 +370,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		// Get specific repository issues
 		parts := strings.Split(repoInput, "/")
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			message := "❌ repository は owner/repo 形式、または all を指定してください。"
+			message := MsgInvalidRepoFormat
 			s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 				Content: &message,
 			})
@@ -385,11 +385,11 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	if err != nil {
 		var message string
 		if err == usecase.ErrTokenNotFound {
-			message = "❌ トークンが登録されていません。`/setting` でトークンを登録してください。"
+			message = MsgTokenNotFound
 		} else if ghErr, ok := err.(*github.GitHubError); ok {
-			message = fmt.Sprintf("❌ GitHub API エラー: %s", ghErr.Message)
+			message = fmt.Sprintf(MsgGitHubAPIError, ghErr.Message)
 		} else {
-			message = "❌ Issue の取得に失敗しました"
+			message = MsgIssueFetchFailed
 		}
 
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
@@ -399,7 +399,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if len(issues) == 0 {
-		message := "📭 Issue が見つかりませんでした"
+		message := MsgNoIssuesFound
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 			Content: &message,
 		})
@@ -413,8 +413,8 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	var content string
-	if rateLimit != nil && rateLimit.Remaining < 10 {
-		content = fmt.Sprintf("⚠️ API Rate Limit 残り: %d (リセット: %s)",
+	if rateLimit != nil && rateLimit.Remaining < RateLimitWarningThreshold {
+		content = fmt.Sprintf(MsgRateLimitWarning,
 			rateLimit.Remaining,
 			rateLimit.ResetAt.Format("15:04:05"))
 	}
@@ -436,11 +436,11 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 	if err != nil {
 		var message string
 		if err == usecase.ErrTokenNotFound {
-			message = "❌ トークンが登録されていません。`/setting` でトークンを登録してください。"
+			message = MsgTokenNotFound
 		} else if ghErr, ok := err.(*github.GitHubError); ok {
-			message = fmt.Sprintf("❌ GitHub API エラー: %s", ghErr.Message)
+			message = fmt.Sprintf(MsgGitHubAPIError, ghErr.Message)
 		} else {
-			message = "❌ Issue の取得に失敗しました"
+			message = MsgIssueFetchFailed
 		}
 
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
@@ -450,7 +450,7 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if len(issues) == 0 {
-		message := "📭 割り当てられた Issue は見つかりませんでした"
+		message := MsgNoAssignedIssuesFound
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 			Content: &message,
 		})
@@ -464,8 +464,8 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	var content string
-	if rateLimit != nil && rateLimit.Remaining < 10 {
-		content = fmt.Sprintf("⚠️ API Rate Limit 残り: %d (リセット: %s)",
+	if rateLimit != nil && rateLimit.Remaining < RateLimitWarningThreshold {
+		content = fmt.Sprintf(MsgRateLimitWarning,
 			rateLimit.Remaining,
 			rateLimit.ResetAt.Format("15:04:05"))
 	}
@@ -474,7 +474,6 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 }
 
 func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.InteractionCreate, content string, embeds []*discordgo.MessageEmbed) {
-	const maxEmbedsPerMessage = 10
 
 	if len(embeds) == 0 {
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
@@ -484,8 +483,8 @@ func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.In
 	}
 
 	firstEmbeds := embeds
-	if len(firstEmbeds) > maxEmbedsPerMessage {
-		firstEmbeds = embeds[:maxEmbedsPerMessage]
+	if len(firstEmbeds) > MaxEmbedsPerMessage {
+		firstEmbeds = embeds[:MaxEmbedsPerMessage]
 	}
 
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
@@ -493,8 +492,8 @@ func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.In
 		Embeds:  &firstEmbeds,
 	})
 
-	for offset := maxEmbedsPerMessage; offset < len(embeds); offset += maxEmbedsPerMessage {
-		end := offset + maxEmbedsPerMessage
+	for offset := MaxEmbedsPerMessage; offset < len(embeds); offset += MaxEmbedsPerMessage {
+		end := offset + MaxEmbedsPerMessage
 		if end > len(embeds) {
 			end = len(embeds)
 		}
