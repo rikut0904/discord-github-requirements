@@ -183,8 +183,8 @@ func isRepositoryExcluded(repoFullName string, excludePatterns []string) bool {
 }
 
 func matchesExcludePattern(repoFullName, pattern string) bool {
-	pattern = trimString(pattern)
-	repoFullName = trimString(repoFullName)
+	pattern = strings.TrimSpace(pattern)
+	repoFullName = strings.TrimSpace(repoFullName)
 
 	// Exact match: "owner/repo"
 	if pattern == repoFullName {
@@ -192,58 +192,15 @@ func matchesExcludePattern(repoFullName, pattern string) bool {
 	}
 
 	// Organization wildcard: "owner/*"
-	if endsWithSlashStar(pattern) {
-		owner := pattern[:len(pattern)-2] // Remove "/*"
-		return startsWithOwner(repoFullName, owner)
+	if strings.HasSuffix(pattern, "/*") {
+		owner := strings.TrimSuffix(pattern, "/*")
+		return strings.HasPrefix(repoFullName, owner+"/")
 	}
 
 	// Organization match: "owner" (treated as "owner/*")
-	if !containsSlash(pattern) {
-		return startsWithOwner(repoFullName, pattern)
+	if !strings.Contains(pattern, "/") {
+		return strings.HasPrefix(repoFullName, pattern+"/")
 	}
 
 	return false
-}
-
-func trimString(s string) string {
-	// Manual trim implementation
-	start := 0
-	end := len(s)
-
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-
-	return s[start:end]
-}
-
-func containsSlash(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '/' {
-			return true
-		}
-	}
-	return false
-}
-
-func endsWithSlashStar(s string) bool {
-	return len(s) >= 2 && s[len(s)-2:] == "/*"
-}
-
-func startsWithOwner(repoFullName, owner string) bool {
-	if len(repoFullName) < len(owner)+1 {
-		return false
-	}
-	// Check if repoFullName starts with "owner/"
-	if repoFullName[:len(owner)] != owner {
-		return false
-	}
-	if len(repoFullName) == len(owner) {
-		return false
-	}
-	return repoFullName[len(owner)] == '/'
 }
