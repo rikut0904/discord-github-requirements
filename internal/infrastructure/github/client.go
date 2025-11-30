@@ -167,6 +167,65 @@ func (c *Client) GetAllRepositoryIssues(owner, repo string) ([]Issue, *RateLimit
 	})
 }
 
+func (c *Client) GetUserRepositories(page, perPage int) ([]Repository, *RateLimitInfo, error) {
+	url := fmt.Sprintf("https://api.github.com/user/repos?page=%d&per_page=%d&affiliation=owner,collaborator,organization_member", page, perPage)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	rateLimit := parseRateLimit(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, rateLimit, &GitHubError{
+			StatusCode: resp.StatusCode,
+			Message:    getErrorMessage(resp.StatusCode),
+		}
+	}
+
+	var repos []Repository
+	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
+		return nil, rateLimit, err
+	}
+
+	return repos, rateLimit, nil
+}
+
+func (c *Client) GetAllUserRepositories() ([]Repository, *RateLimitInfo, error) {
+	var allRepos []Repository
+	var lastRateLimit *RateLimitInfo
+
+	for page := 1; ; page++ {
+		repos, rateLimit, err := c.GetUserRepositories(page, maxPerPage)
+		if err != nil {
+			return nil, rateLimit, err
+		}
+
+		if rateLimit != nil {
+			lastRateLimit = rateLimit
+		}
+
+		allRepos = append(allRepos, repos...)
+
+		if len(repos) < maxPerPage {
+			break
+		}
+	}
+
+	return allRepos, lastRateLimit, nil
+}
+
 func (c *Client) collectAllIssues(fetch func(page int) ([]Issue, *RateLimitInfo, error)) ([]Issue, *RateLimitInfo, error) {
 	var allIssues []Issue
 	var lastRateLimit *RateLimitInfo

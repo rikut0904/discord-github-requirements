@@ -76,6 +76,90 @@ func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channe
 	return issues, rateLimit, err
 }
 
+func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, channelID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {
+	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if setting == nil {
+		return nil, nil, ErrTokenNotFound
+	}
+
+	token, err := u.crypto.Decrypt(setting.EncryptedToken)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	client := github.NewClient(token)
+
+	// Get all user repositories
+	repos, rateLimit, err := client.GetAllUserRepositories()
+	if err != nil {
+		return nil, rateLimit, err
+	}
+
+	// Filter out excluded repositories
+	excludeMap := make(map[string]bool)
+	for _, repo := range setting.ExcludedRepositories {
+		excludeMap[repo] = true
+	}
+
+	var allIssues []github.Issue
+	for _, repo := range repos {
+		// Skip excluded repositories
+		if excludeMap[repo.FullName] {
+			continue
+		}
+
+		// Extract owner and repo name
+		parts := splitRepoFullName(repo.FullName)
+		if len(parts) != 2 {
+			continue
+		}
+
+		owner := parts[0]
+		repoName := parts[1]
+
+		// Get issues for this repository
+		issues, rl, err := client.GetAllRepositoryIssues(owner, repoName)
+		if err != nil {
+			// Skip repositories with errors (e.g., permission issues)
+			continue
+		}
+
+		if rl != nil {
+			rateLimit = rl
+		}
+
+		// Add repository info to each issue
+		for idx := range issues {
+			if issues[idx].Repository == nil {
+				issues[idx].Repository = &github.Repository{FullName: repo.FullName}
+			}
+		}
+
+		allIssues = append(allIssues, issues...)
+	}
+
+	return allIssues, rateLimit, nil
+}
+
+func splitRepoFullName(fullName string) []string {
+	parts := make([]string, 0, 2)
+	slashIndex := -1
+	for i, ch := range fullName {
+		if ch == '/' {
+			slashIndex = i
+			break
+		}
+	}
+	if slashIndex > 0 && slashIndex < len(fullName)-1 {
+		parts = append(parts, fullName[:slashIndex])
+		parts = append(parts, fullName[slashIndex+1:])
+	}
+	return parts
+}
+
 func (u *IssuesUsecase) filterExcludedRepositories(issues []github.Issue, excludedRepos []string) []github.Issue {
 	if len(excludedRepos) == 0 {
 		return issues
