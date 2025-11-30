@@ -166,9 +166,9 @@ func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.Int
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "exclude_input",
-							Label:       "除外するリポジトリ (owner/repo形式、1行に1つ)",
+							Label:       "除外パターン (1行に1つ)",
 							Style:       discordgo.TextInputParagraph,
-							Placeholder: "owner1/repo1\nowner2/repo2",
+							Placeholder: "owner/repo (特定リポジトリ)\nowner/* (organization全体)\nowner (owner/*と同じ)",
 							Required:    false,
 							Value:       excludeText,
 							MaxLength:   4000,
@@ -260,9 +260,8 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if line != "" {
-				parts := strings.Split(line, "/")
-				if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-					message := fmt.Sprintf("❌ 不正な形式のリポジトリ名があります: %s\n正しい形式: owner/repo", line)
+				if !isValidExcludePattern(line) {
+					message := fmt.Sprintf("❌ 不正な形式があります: %s\n正しい形式:\n- owner/repo (特定リポジトリ)\n- owner/* (organization全体)\n- owner (owner/*と同じ)", line)
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -485,6 +484,37 @@ func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.In
 			break
 		}
 	}
+}
+
+func isValidExcludePattern(pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+
+	// Check for invalid characters
+	if strings.ContainsAny(pattern, " \t\r\n") {
+		return false
+	}
+
+	parts := strings.Split(pattern, "/")
+
+	// Pattern: "owner" or "owner/*"
+	if len(parts) == 1 {
+		// Just owner name
+		return parts[0] != ""
+	}
+
+	// Pattern: "owner/*" or "owner/repo"
+	if len(parts) == 2 {
+		if parts[0] == "" {
+			return false
+		}
+		// Allow "owner/*" or "owner/repo"
+		return parts[1] == "*" || parts[1] != ""
+	}
+
+	return false
 }
 
 func createIssueEmbed(issue github.Issue) *discordgo.MessageEmbed {
