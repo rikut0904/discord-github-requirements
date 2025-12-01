@@ -292,15 +292,10 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 	}
 
 	var message string
-	commandName := CommandTypeIssues
-	if commandType == CommandTypeAssign {
-		commandName = CommandTypeAssign
-	}
-
 	if len(repositories) == 0 {
-		message = fmt.Sprintf(MsgExcludeCleared, commandName)
+		message = fmt.Sprintf(MsgExcludeCleared, commandType)
 	} else {
-		message = fmt.Sprintf(MsgExcludeSaved, commandName, len(repositories))
+		message = fmt.Sprintf(MsgExcludeSaved, commandType, len(repositories))
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
