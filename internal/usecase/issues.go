@@ -195,10 +195,28 @@ func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, u
 		FailedRepos: make([]RepositoryError, 0),
 	}
 
-	// Use issues command excluded repositories
+
+	// Fetch issues from repositories with exclusion filtering
+	allIssues, rl := fetchIssuesFromRepositories(client, repos, setting.ExcludedIssuesRepositories)
+	if rl != nil {
+		rateLimit = rl
+	}
+
+	return allIssues, rateLimit, nil
+}
+
+func splitRepoFullName(fullName string) []string {
+	return strings.SplitN(fullName, "/", 2)
+}
+
+// fetchIssuesFromRepositories は複数のリポジトリからIssueを取得する共通ロジックです
+func fetchIssuesFromRepositories(client *github.Client, repos []github.Repository, excludedRepos []string) ([]github.Issue, *github.RateLimitInfo) {
+	var allIssues []github.Issue
+	var rateLimit *github.RateLimitInfo
+
 	for _, repo := range repos {
 		// Skip excluded repositories using pattern matching
-		if isRepositoryExcluded(repo.FullName, setting.ExcludedIssuesRepositories) {
+		if isRepositoryExcluded(repo.FullName, excludedRepos) {
 			continue
 		}
 
@@ -235,7 +253,6 @@ func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, u
 
 		result.Issues = append(result.Issues, issues...)
 	}
-
 	return result, nil
 }
 

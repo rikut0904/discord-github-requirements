@@ -368,6 +368,67 @@ func (h *DiscordHandler) respondDeferred(s *discordgo.Session, i *discordgo.Inte
 	})
 }
 
+// repositoryInputType はリポジトリ入力の種類を表します
+type repositoryInputType int
+
+const (
+	repoInputTypeAll repositoryInputType = iota
+	repoInputTypeUser
+	repoInputTypeSpecific
+	repoInputTypeInvalid
+)
+
+// repositoryInput はパースされたリポジトリ入力を表します
+type repositoryInput struct {
+	inputType repositoryInputType
+	owner     string
+	repo      string
+	username  string
+}
+
+// parseRepositoryInput はリポジトリ入力をパースして検証します
+func parseRepositoryInput(repoInput string) repositoryInput {
+	if strings.ToLower(repoInput) == "all" {
+		return repositoryInput{inputType: repoInputTypeAll}
+	}
+
+	parts := strings.Split(repoInput, "/")
+	if len(parts) == 1 {
+		username := strings.TrimSpace(parts[0])
+		if username == "" {
+			return repositoryInput{inputType: repoInputTypeInvalid}
+		}
+		return repositoryInput{
+			inputType: repoInputTypeUser,
+			username:  username,
+		}
+	}
+
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return repositoryInput{
+			inputType: repoInputTypeSpecific,
+			owner:     parts[0],
+			repo:      parts[1],
+		}
+	}
+
+	return repositoryInput{inputType: repoInputTypeInvalid}
+}
+
+// fetchIssuesByRepository はリポジトリ入力に基づいてissuesを取得します
+func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, channelID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, error) {
+	switch input.inputType {
+	case repoInputTypeAll:
+		return h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+	case repoInputTypeUser:
+		return h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, input.username)
+	case repoInputTypeSpecific:
+		return h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, input.owner, input.repo)
+	default:
+		return nil, nil, fmt.Errorf("unexpected repository input type: %d", input.inputType)
+	}
+}
+
 func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	repoInput := ""
@@ -383,6 +444,13 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
+	// Parse and validate repository input
+	input := parseRepositoryInput(repoInput)
+	if input.inputType == repoInputTypeInvalid {
+		h.respondWithError(s, i, MsgInvalidRepoFormat)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
 	guildID := i.GuildID
@@ -390,9 +458,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	userID := i.Member.User.ID
 
 	// Defer response for long operations
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
+	h.respondDeferred(s, i)
 
 	var issues []github.Issue
 	var rateLimit *github.RateLimitInfo
@@ -451,18 +517,12 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if err != nil {
-		message := h.formatIssuesFetchError(err)
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
 		return
 	}
 
 	if len(issues) == 0 {
-		message := MsgNoIssuesFound
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, MsgNoIssuesFound)
 		return
 	}
 
@@ -512,18 +572,12 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 
 	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID)
 	if err != nil {
-		message := h.formatIssuesFetchError(err)
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
 		return
 	}
 
 	if len(issues) == 0 {
-		message := MsgNoAssignedIssuesFound
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, MsgNoAssignedIssuesFound)
 		return
 	}
 
