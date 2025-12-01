@@ -112,42 +112,10 @@ func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, c
 		return nil, rateLimit, err
 	}
 
-	// Use issues command excluded repositories
-	var allIssues []github.Issue
-	for _, repo := range repos {
-		// Skip excluded repositories using pattern matching
-		if isRepositoryExcluded(repo.FullName, setting.ExcludedIssuesRepositories) {
-			continue
-		}
-
-		// Extract owner and repo name
-		parts := splitRepoFullName(repo.FullName)
-		if len(parts) != 2 {
-			continue
-		}
-
-		owner := parts[0]
-		repoName := parts[1]
-
-		// Get issues for this repository
-		issues, rl, err := client.GetAllRepositoryIssues(owner, repoName)
-		if err != nil {
-			// Skip repositories with errors (e.g., permission issues)
-			continue
-		}
-
-		if rl != nil {
-			rateLimit = rl
-		}
-
-		// Add repository info to each issue
-		for idx := range issues {
-			if issues[idx].Repository == nil {
-				issues[idx].Repository = &github.Repository{FullName: repo.FullName}
-			}
-		}
-
-		allIssues = append(allIssues, issues...)
+	// Fetch issues from repositories with exclusion filtering
+	allIssues, rl := fetchIssuesFromRepositories(client, repos, setting.ExcludedIssuesRepositories)
+	if rl != nil {
+		rateLimit = rl
 	}
 
 	return allIssues, rateLimit, nil
@@ -167,11 +135,27 @@ func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, u
 		return nil, rateLimit, err
 	}
 
-	// Use issues command excluded repositories
+	// Fetch issues from repositories with exclusion filtering
+	allIssues, rl := fetchIssuesFromRepositories(client, repos, setting.ExcludedIssuesRepositories)
+	if rl != nil {
+		rateLimit = rl
+	}
+
+	return allIssues, rateLimit, nil
+}
+
+func splitRepoFullName(fullName string) []string {
+	return strings.SplitN(fullName, "/", 2)
+}
+
+// fetchIssuesFromRepositories は複数のリポジトリからIssueを取得する共通ロジックです
+func fetchIssuesFromRepositories(client *github.Client, repos []github.Repository, excludedRepos []string) ([]github.Issue, *github.RateLimitInfo) {
 	var allIssues []github.Issue
+	var rateLimit *github.RateLimitInfo
+
 	for _, repo := range repos {
 		// Skip excluded repositories using pattern matching
-		if isRepositoryExcluded(repo.FullName, setting.ExcludedIssuesRepositories) {
+		if isRepositoryExcluded(repo.FullName, excludedRepos) {
 			continue
 		}
 
@@ -205,11 +189,7 @@ func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, u
 		allIssues = append(allIssues, issues...)
 	}
 
-	return allIssues, rateLimit, nil
-}
-
-func splitRepoFullName(fullName string) []string {
-	return strings.SplitN(fullName, "/", 2)
+	return allIssues, rateLimit
 }
 
 func (u *IssuesUsecase) filterExcludedRepositories(issues []github.Issue, excludedRepos []string) []github.Issue {
