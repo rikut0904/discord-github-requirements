@@ -416,16 +416,31 @@ func parseRepositoryInput(repoInput string) repositoryInput {
 }
 
 // fetchIssuesByRepository はリポジトリ入力に基づいてissuesを取得します
-func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, channelID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, error) {
+func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, channelID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, []usecase.RepositoryError, error) {
 	switch input.inputType {
 	case repoInputTypeAll:
-		return h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+		result, err := h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+		if err != nil {
+			if result != nil {
+				return nil, result.RateLimit, nil, err
+			}
+			return nil, nil, nil, err
+		}
+		return result.Issues, result.RateLimit, result.FailedRepos, nil
 	case repoInputTypeUser:
-		return h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, input.username)
+		result, err := h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, input.username)
+		if err != nil {
+			if result != nil {
+				return nil, result.RateLimit, nil, err
+			}
+			return nil, nil, nil, err
+		}
+		return result.Issues, result.RateLimit, result.FailedRepos, nil
 	case repoInputTypeSpecific:
-		return h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, input.owner, input.repo)
+		issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, input.owner, input.repo)
+		return issues, rateLimit, nil, err
 	default:
-		return nil, nil, fmt.Errorf("unexpected repository input type: %d", input.inputType)
+		return nil, nil, nil, fmt.Errorf("unexpected repository input type: %d", input.inputType)
 	}
 }
 
@@ -460,61 +475,8 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	// Defer response for long operations
 	h.respondDeferred(s, i)
 
-	var issues []github.Issue
-	var rateLimit *github.RateLimitInfo
-	var failedRepos []usecase.RepositoryError
-	var err error
-
-	if strings.ToLower(repoInput) == "all" {
-		// Get all repositories' issues
-		result, resultErr := h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
-		if resultErr != nil {
-			err = resultErr
-			if result != nil {
-				rateLimit = result.RateLimit
-			}
-		} else {
-			issues = result.Issues
-			rateLimit = result.RateLimit
-			failedRepos = result.FailedRepos
-		}
-	} else {
-		// Parse repository input
-		parts := strings.Split(repoInput, "/")
-		if len(parts) == 1 {
-			// Get specific user's all repositories' issues
-			username := strings.TrimSpace(parts[0])
-			if username == "" {
-				message := MsgInvalidRepoFormat
-				s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-					Content: &message,
-				})
-				return
-			}
-			result, resultErr := h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, username)
-			if resultErr != nil {
-				err = resultErr
-				if result != nil {
-					rateLimit = result.RateLimit
-				}
-			} else {
-				issues = result.Issues
-				rateLimit = result.RateLimit
-				failedRepos = result.FailedRepos
-			}
-		} else if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			// Get specific repository issues
-			owner := parts[0]
-			repo := parts[1]
-			issues, rateLimit, err = h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
-		} else {
-			message := MsgInvalidRepoFormat
-			s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-				Content: &message,
-			})
-			return
-		}
-	}
+	// Fetch issues based on repository input
+	issues, rateLimit, failedRepos, err := h.fetchIssuesByRepository(ctx, guildID, channelID, userID, input)
 
 	if err != nil {
 		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))

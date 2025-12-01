@@ -125,53 +125,8 @@ func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, c
 		return &IssuesResult{RateLimit: rateLimit}, err
 	}
 
-	result := &IssuesResult{
-		Issues:      make([]github.Issue, 0),
-		RateLimit:   rateLimit,
-		FailedRepos: make([]RepositoryError, 0),
-	}
-
-	// Use issues command excluded repositories
-	for _, repo := range repos {
-		// Skip excluded repositories using pattern matching
-		if isRepositoryExcluded(repo.FullName, setting.ExcludedIssuesRepositories) {
-			continue
-		}
-
-		// Extract owner and repo name
-		parts := splitRepoFullName(repo.FullName)
-		if len(parts) != 2 {
-			continue
-		}
-
-		owner := parts[0]
-		repoName := parts[1]
-
-		// Get issues for this repository
-		issues, rl, err := client.GetAllRepositoryIssues(owner, repoName)
-		if err != nil {
-			// Collect error instead of silently skipping
-			result.FailedRepos = append(result.FailedRepos, RepositoryError{
-				RepositoryName: repo.FullName,
-				Error:          err,
-			})
-			continue
-		}
-
-		if rl != nil {
-			result.RateLimit = rl
-		}
-
-		// Add repository info to each issue
-		for idx := range issues {
-			if issues[idx].Repository == nil {
-				issues[idx].Repository = &github.Repository{FullName: repo.FullName}
-			}
-		}
-
-		result.Issues = append(result.Issues, issues...)
-	}
-
+	// Fetch issues from repositories with exclusion filtering and error collection
+	result := fetchIssuesFromRepositories(client, repos, setting.ExcludedIssuesRepositories, rateLimit)
 	return result, nil
 }
 
@@ -189,20 +144,9 @@ func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, u
 		return &IssuesResult{RateLimit: rateLimit}, err
 	}
 
-	result := &IssuesResult{
-		Issues:      make([]github.Issue, 0),
-		RateLimit:   rateLimit,
-		FailedRepos: make([]RepositoryError, 0),
-	}
-
-
-	// Fetch issues from repositories with exclusion filtering
-	allIssues, rl := fetchIssuesFromRepositories(client, repos, setting.ExcludedIssuesRepositories)
-	if rl != nil {
-		rateLimit = rl
-	}
-
-	return allIssues, rateLimit, nil
+	// Fetch issues from repositories with exclusion filtering and error collection
+	result := fetchIssuesFromRepositories(client, repos, setting.ExcludedIssuesRepositories, rateLimit)
+	return result, nil
 }
 
 func splitRepoFullName(fullName string) []string {
@@ -210,9 +154,12 @@ func splitRepoFullName(fullName string) []string {
 }
 
 // fetchIssuesFromRepositories は複数のリポジトリからIssueを取得する共通ロジックです
-func fetchIssuesFromRepositories(client *github.Client, repos []github.Repository, excludedRepos []string) ([]github.Issue, *github.RateLimitInfo) {
-	var allIssues []github.Issue
-	var rateLimit *github.RateLimitInfo
+func fetchIssuesFromRepositories(client *github.Client, repos []github.Repository, excludedRepos []string, initialRateLimit *github.RateLimitInfo) *IssuesResult {
+	result := &IssuesResult{
+		Issues:      make([]github.Issue, 0),
+		RateLimit:   initialRateLimit,
+		FailedRepos: make([]RepositoryError, 0),
+	}
 
 	for _, repo := range repos {
 		// Skip excluded repositories using pattern matching
@@ -253,11 +200,7 @@ func fetchIssuesFromRepositories(client *github.Client, repos []github.Repositor
 
 		result.Issues = append(result.Issues, issues...)
 	}
-	return result, nil
-}
-
-func splitRepoFullName(fullName string) []string {
-	return strings.SplitN(fullName, "/", 2)
+	return result
 }
 
 func (u *IssuesUsecase) filterExcludedRepositories(issues []github.Issue, excludedRepos []string) []github.Issue {
