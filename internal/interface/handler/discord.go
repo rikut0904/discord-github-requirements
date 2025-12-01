@@ -332,6 +332,42 @@ func (h *DiscordHandler) getModalInputValue(i *discordgo.InteractionCreate, cust
 	return ""
 }
 
+// respondWithError は通常のエラーレスポンスを送信します
+func (h *DiscordHandler) respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: message,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// respondEditWithError はDeferred Responseのエラーメッセージを編集します
+func (h *DiscordHandler) respondEditWithError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &message,
+	})
+}
+
+// respondWithSuccess は成功メッセージを送信します
+func (h *DiscordHandler) respondWithSuccess(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: message,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// respondDeferred はDeferred Responseを送信します（長時間かかる処理の前に呼ぶ）
+func (h *DiscordHandler) respondDeferred(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+}
+
 func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	repoInput := ""
@@ -343,14 +379,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if repoInput == "" {
-		message := MsgInvalidRepoFormat
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: message,
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
+		h.respondWithError(s, i, MsgInvalidRepoFormat)
 		return
 	}
 
