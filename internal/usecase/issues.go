@@ -75,11 +75,7 @@ func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelI
 	}
 
 	// Apply excluded repositories filter for assign command
-	excludedRepos := setting.ExcludedAssignRepositories
-	if excludedRepos == nil {
-		excludedRepos = []string{}
-	}
-	filteredIssues := u.filterExcludedRepositories(issues, excludedRepos)
+	filteredIssues := u.filterExcludedRepositories(issues, setting.ExcludedAssignRepositories)
 	return filteredIssues, rateLimit, nil
 }
 
@@ -117,15 +113,10 @@ func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, c
 	}
 
 	// Use issues command excluded repositories
-	excludedRepos := setting.ExcludedIssuesRepositories
-	if excludedRepos == nil {
-		excludedRepos = []string{}
-	}
-
 	var allIssues []github.Issue
 	for _, repo := range repos {
 		// Skip excluded repositories using pattern matching
-		if isRepositoryExcluded(repo.FullName, excludedRepos) {
+		if isRepositoryExcluded(repo.FullName, setting.ExcludedIssuesRepositories) {
 			continue
 		}
 
