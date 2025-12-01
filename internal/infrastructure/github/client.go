@@ -60,12 +60,11 @@ func NewClient(token string) *Client {
 	}
 }
 
-func (c *Client) GetAssignedIssues(page, perPage int) ([]Issue, *RateLimitInfo, error) {
-	url := fmt.Sprintf("https://api.github.com/issues?page=%d&per_page=%d&state=open", page, perPage)
-
+// doRequest はGitHub APIへの汎用的なHTTPリクエストを実行します
+func (c *Client) doRequest(url string, result interface{}) (*RateLimitInfo, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.token)
@@ -74,85 +73,47 @@ func (c *Client) GetAssignedIssues(page, perPage int) ([]Issue, *RateLimitInfo, 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	rateLimit := parseRateLimit(resp)
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, rateLimit, &GitHubError{
+		return rateLimit, &GitHubError{
 			StatusCode: resp.StatusCode,
 			Message:    getErrorMessage(resp.StatusCode),
 		}
 	}
 
-	var issues []Issue
-	if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
-		return nil, rateLimit, err
+	if result != nil {
+		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+			return rateLimit, err
+		}
 	}
 
-	return issues, rateLimit, nil
+	return rateLimit, nil
+}
+
+func (c *Client) GetAssignedIssues(page, perPage int) ([]Issue, *RateLimitInfo, error) {
+	url := fmt.Sprintf("https://api.github.com/issues?page=%d&per_page=%d&state=open", page, perPage)
+
+	var issues []Issue
+	rateLimit, err := c.doRequest(url, &issues)
+	return issues, rateLimit, err
 }
 
 func (c *Client) GetRepositoryIssues(owner, repo string, page, perPage int) ([]Issue, *RateLimitInfo, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues?page=%d&per_page=%d&state=open", owner, repo, page, perPage)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
-
-	rateLimit := parseRateLimit(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, rateLimit, &GitHubError{
-			StatusCode: resp.StatusCode,
-			Message:    getErrorMessage(resp.StatusCode),
-		}
-	}
-
 	var issues []Issue
-	if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
-		return nil, rateLimit, err
-	}
-
-	return issues, rateLimit, nil
+	rateLimit, err := c.doRequest(url, &issues)
+	return issues, rateLimit, err
 }
 
 func (c *Client) ValidateToken() error {
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &GitHubError{
-			StatusCode: resp.StatusCode,
-			Message:    getErrorMessage(resp.StatusCode),
-		}
-	}
-
-	return nil
+	_, err := c.doRequest("https://api.github.com/user", nil)
+	return err
 }
 
 func (c *Client) GetAllAssignedIssues() ([]Issue, *RateLimitInfo, error) {
@@ -170,36 +131,9 @@ func (c *Client) GetAllRepositoryIssues(owner, repo string) ([]Issue, *RateLimit
 func (c *Client) GetUserRepositories(page, perPage int) ([]Repository, *RateLimitInfo, error) {
 	url := fmt.Sprintf("https://api.github.com/user/repos?page=%d&per_page=%d&affiliation=owner,collaborator,organization_member", page, perPage)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
-
-	rateLimit := parseRateLimit(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, rateLimit, &GitHubError{
-			StatusCode: resp.StatusCode,
-			Message:    getErrorMessage(resp.StatusCode),
-		}
-	}
-
 	var repos []Repository
-	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
-		return nil, rateLimit, err
-	}
-
-	return repos, rateLimit, nil
+	rateLimit, err := c.doRequest(url, &repos)
+	return repos, rateLimit, err
 }
 
 // collectAllPages は汎用的なページネーション処理を行います
@@ -237,36 +171,9 @@ func (c *Client) GetAllUserRepositories() ([]Repository, *RateLimitInfo, error) 
 func (c *Client) GetSpecificUserRepositories(username string, page, perPage int) ([]Repository, *RateLimitInfo, error) {
 	url := fmt.Sprintf("https://api.github.com/users/%s/repos?page=%d&per_page=%d&type=all", username, page, perPage)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
-
-	rateLimit := parseRateLimit(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, rateLimit, &GitHubError{
-			StatusCode: resp.StatusCode,
-			Message:    getErrorMessage(resp.StatusCode),
-		}
-	}
-
 	var repos []Repository
-	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
-		return nil, rateLimit, err
-	}
-
-	return repos, rateLimit, nil
+	rateLimit, err := c.doRequest(url, &repos)
+	return repos, rateLimit, err
 }
 
 // GetAllSpecificUserRepositories gets all repositories for a specific user (all pages)
