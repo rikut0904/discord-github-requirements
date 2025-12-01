@@ -511,10 +511,10 @@ func isValidExcludePattern(pattern string) bool {
 
 	parts := strings.Split(pattern, "/")
 
-	// Pattern: "owner" or "owner/*"
+	// Pattern: "owner"
 	if len(parts) == 1 {
-		// Just owner name
-		return parts[0] != ""
+		// Just owner name (already validated as non-empty)
+		return true
 	}
 
 	// Pattern: "owner/*" or "owner/repo"
