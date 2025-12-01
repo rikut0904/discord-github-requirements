@@ -368,6 +368,67 @@ func (h *DiscordHandler) respondDeferred(s *discordgo.Session, i *discordgo.Inte
 	})
 }
 
+// repositoryInputType はリポジトリ入力の種類を表します
+type repositoryInputType int
+
+const (
+	repoInputTypeAll repositoryInputType = iota
+	repoInputTypeUser
+	repoInputTypeSpecific
+	repoInputTypeInvalid
+)
+
+// repositoryInput はパースされたリポジトリ入力を表します
+type repositoryInput struct {
+	inputType repositoryInputType
+	owner     string
+	repo      string
+	username  string
+}
+
+// parseRepositoryInput はリポジトリ入力をパースして検証します
+func parseRepositoryInput(repoInput string) repositoryInput {
+	if strings.ToLower(repoInput) == "all" {
+		return repositoryInput{inputType: repoInputTypeAll}
+	}
+
+	parts := strings.Split(repoInput, "/")
+	if len(parts) == 1 {
+		username := strings.TrimSpace(parts[0])
+		if username == "" {
+			return repositoryInput{inputType: repoInputTypeInvalid}
+		}
+		return repositoryInput{
+			inputType: repoInputTypeUser,
+			username:  username,
+		}
+	}
+
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return repositoryInput{
+			inputType: repoInputTypeSpecific,
+			owner:     parts[0],
+			repo:      parts[1],
+		}
+	}
+
+	return repositoryInput{inputType: repoInputTypeInvalid}
+}
+
+// fetchIssuesByRepository はリポジトリ入力に基づいてissuesを取得します
+func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, channelID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, error) {
+	switch input.inputType {
+	case repoInputTypeAll:
+		return h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+	case repoInputTypeUser:
+		return h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, input.username)
+	case repoInputTypeSpecific:
+		return h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, input.owner, input.repo)
+	default:
+		return nil, nil, nil
+	}
+}
+
 func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	repoInput := ""
@@ -383,6 +444,13 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
+	// Parse and validate repository input
+	input := parseRepositoryInput(repoInput)
+	if input.inputType == repoInputTypeInvalid {
+		h.respondWithError(s, i, MsgInvalidRepoFormat)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
 	guildID := i.GuildID
@@ -390,38 +458,10 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	userID := i.Member.User.ID
 
 	// Defer response for long operations
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
+	h.respondDeferred(s, i)
 
-	var issues []github.Issue
-	var rateLimit *github.RateLimitInfo
-	var err error
-
-	if strings.ToLower(repoInput) == "all" {
-		// Get all repositories' issues
-		issues, rateLimit, err = h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
-	} else {
-		// Parse repository input
-		parts := strings.Split(repoInput, "/")
-		if len(parts) == 1 {
-			// Get specific user's all repositories' issues
-			username := strings.TrimSpace(parts[0])
-			if username == "" {
-				h.respondEditWithError(s, i, MsgInvalidRepoFormat)
-				return
-			}
-			issues, rateLimit, err = h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, username)
-		} else if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			// Get specific repository issues
-			owner := parts[0]
-			repo := parts[1]
-			issues, rateLimit, err = h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
-		} else {
-			h.respondEditWithError(s, i, MsgInvalidRepoFormat)
-			return
-		}
-	}
+	// Fetch issues based on repository input
+	issues, rateLimit, err := h.fetchIssuesByRepository(ctx, guildID, channelID, userID, input)
 
 	if err != nil {
 		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
