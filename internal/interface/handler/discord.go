@@ -408,10 +408,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 			// Get specific user's all repositories' issues
 			username := strings.TrimSpace(parts[0])
 			if username == "" {
-				message := MsgInvalidRepoFormat
-				s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-					Content: &message,
-				})
+				h.respondEditWithError(s, i, MsgInvalidRepoFormat)
 				return
 			}
 			issues, rateLimit, err = h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, username)
@@ -421,27 +418,18 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 			repo := parts[1]
 			issues, rateLimit, err = h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
 		} else {
-			message := MsgInvalidRepoFormat
-			s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-				Content: &message,
-			})
+			h.respondEditWithError(s, i, MsgInvalidRepoFormat)
 			return
 		}
 	}
 
 	if err != nil {
-		message := h.formatIssuesFetchError(err)
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
 		return
 	}
 
 	if len(issues) == 0 {
-		message := MsgNoIssuesFound
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, MsgNoIssuesFound)
 		return
 	}
 
@@ -474,18 +462,12 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 
 	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID)
 	if err != nil {
-		message := h.formatIssuesFetchError(err)
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
 		return
 	}
 
 	if len(issues) == 0 {
-		message := MsgNoAssignedIssuesFound
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, MsgNoAssignedIssuesFound)
 		return
 	}
 
