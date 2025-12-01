@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github-discord-bot/internal/domain/entity"
 	"github-discord-bot/internal/domain/repository"
 	"github-discord-bot/internal/infrastructure/crypto"
 	"github-discord-bot/internal/infrastructure/github"
@@ -25,16 +26,44 @@ func NewIssuesUsecase(repo repository.UserSettingRepository, crypto *crypto.AESC
 
 var ErrTokenNotFound = errors.New("token not registered")
 
-func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {
+// getDecryptedToken はユーザー設定を取得し、トークンを復号化して返します
+func (u *IssuesUsecase) getDecryptedToken(ctx context.Context, guildID, channelID, userID string) (string, error) {
 	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
 	if err != nil {
-		return nil, nil, err
+		return "", err
 	}
 	if setting == nil {
-		return nil, nil, ErrTokenNotFound
+		return "", ErrTokenNotFound
 	}
 
 	token, err := u.crypto.Decrypt(setting.EncryptedToken)
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
+}
+
+// getSettingAndToken はユーザー設定を取得し、トークンを復号化して両方を返します
+func (u *IssuesUsecase) getSettingAndToken(ctx context.Context, guildID, channelID, userID string) (*entity.UserSetting, string, error) {
+	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+	if err != nil {
+		return nil, "", err
+	}
+	if setting == nil {
+		return nil, "", ErrTokenNotFound
+	}
+
+	token, err := u.crypto.Decrypt(setting.EncryptedToken)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return setting, token, nil
+}
+
+func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {
+	setting, token, err := u.getSettingAndToken(ctx, guildID, channelID, userID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -55,15 +84,7 @@ func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelI
 }
 
 func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channelID, userID, owner, repo string) ([]github.Issue, *github.RateLimitInfo, error) {
-	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if setting == nil {
-		return nil, nil, ErrTokenNotFound
-	}
-
-	token, err := u.crypto.Decrypt(setting.EncryptedToken)
+	token, err := u.getDecryptedToken(ctx, guildID, channelID, userID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -82,15 +103,7 @@ func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channe
 }
 
 func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, channelID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {
-	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if setting == nil {
-		return nil, nil, ErrTokenNotFound
-	}
-
-	token, err := u.crypto.Decrypt(setting.EncryptedToken)
+	setting, token, err := u.getSettingAndToken(ctx, guildID, channelID, userID)
 	if err != nil {
 		return nil, nil, err
 	}
