@@ -425,7 +425,7 @@ func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, c
 	case repoInputTypeSpecific:
 		return h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, input.owner, input.repo)
 	default:
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("unexpected repository input type: %d", input.inputType)
 	}
 }
 
