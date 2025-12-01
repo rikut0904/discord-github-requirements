@@ -373,19 +373,31 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		// Get all repositories' issues
 		issues, rateLimit, err = h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
 	} else {
-		// Get specific repository issues
+		// Parse repository input
 		parts := strings.Split(repoInput, "/")
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		if len(parts) == 1 {
+			// Get specific user's all repositories' issues
+			username := strings.TrimSpace(parts[0])
+			if username == "" {
+				message := MsgInvalidRepoFormat
+				s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+					Content: &message,
+				})
+				return
+			}
+			issues, rateLimit, err = h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, username)
+		} else if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			// Get specific repository issues
+			owner := parts[0]
+			repo := parts[1]
+			issues, rateLimit, err = h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
+		} else {
 			message := MsgInvalidRepoFormat
 			s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 				Content: &message,
 			})
 			return
 		}
-
-		owner := parts[0]
-		repo := parts[1]
-		issues, rateLimit, err = h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
 	}
 
 	if err != nil {
