@@ -26,6 +26,19 @@ func NewIssuesUsecase(repo repository.UserSettingRepository, crypto *crypto.AESC
 
 var ErrTokenNotFound = errors.New("token not registered")
 
+// RepositoryError はリポジトリ処理中に発生したエラーを保持します
+type RepositoryError struct {
+	RepositoryName string
+	Error          error
+}
+
+// IssuesResult はIssue取得結果とエラー情報を保持します
+type IssuesResult struct {
+	Issues       []github.Issue
+	RateLimit    *github.RateLimitInfo
+	FailedRepos  []RepositoryError
+}
+
 // getDecryptedToken はユーザー設定を取得し、トークンを復号化して返します
 func (u *IssuesUsecase) getDecryptedToken(ctx context.Context, guildID, channelID, userID string) (string, error) {
 	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
@@ -98,10 +111,10 @@ func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channe
 	return issues, rateLimit, err
 }
 
-func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, channelID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {
+func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, channelID, userID string) (*IssuesResult, error) {
 	setting, token, err := u.getSettingAndToken(ctx, guildID, channelID, userID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	client := github.NewClient(token)
@@ -109,22 +122,63 @@ func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, c
 	// Get all user repositories
 	repos, rateLimit, err := client.GetAllUserRepositories()
 	if err != nil {
-		return nil, rateLimit, err
+		return &IssuesResult{RateLimit: rateLimit}, err
 	}
 
-	// Fetch issues from repositories with exclusion filtering
-	allIssues, rl := fetchIssuesFromRepositories(client, repos, setting.ExcludedIssuesRepositories)
-	if rl != nil {
-		rateLimit = rl
+	result := &IssuesResult{
+		Issues:      make([]github.Issue, 0),
+		RateLimit:   rateLimit,
+		FailedRepos: make([]RepositoryError, 0),
 	}
 
-	return allIssues, rateLimit, nil
+	// Use issues command excluded repositories
+	for _, repo := range repos {
+		// Skip excluded repositories using pattern matching
+		if isRepositoryExcluded(repo.FullName, setting.ExcludedIssuesRepositories) {
+			continue
+		}
+
+		// Extract owner and repo name
+		parts := splitRepoFullName(repo.FullName)
+		if len(parts) != 2 {
+			continue
+		}
+
+		owner := parts[0]
+		repoName := parts[1]
+
+		// Get issues for this repository
+		issues, rl, err := client.GetAllRepositoryIssues(owner, repoName)
+		if err != nil {
+			// Collect error instead of silently skipping
+			result.FailedRepos = append(result.FailedRepos, RepositoryError{
+				RepositoryName: repo.FullName,
+				Error:          err,
+			})
+			continue
+		}
+
+		if rl != nil {
+			result.RateLimit = rl
+		}
+
+		// Add repository info to each issue
+		for idx := range issues {
+			if issues[idx].Repository == nil {
+				issues[idx].Repository = &github.Repository{FullName: repo.FullName}
+			}
+		}
+
+		result.Issues = append(result.Issues, issues...)
+	}
+
+	return result, nil
 }
 
-func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, userID, username string) ([]github.Issue, *github.RateLimitInfo, error) {
+func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, userID, username string) (*IssuesResult, error) {
 	setting, token, err := u.getSettingAndToken(ctx, guildID, channelID, userID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	client := github.NewClient(token)
@@ -132,8 +186,15 @@ func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, u
 	// Get all repositories for the specific user
 	repos, rateLimit, err := client.GetAllSpecificUserRepositories(username)
 	if err != nil {
-		return nil, rateLimit, err
+		return &IssuesResult{RateLimit: rateLimit}, err
 	}
+
+	result := &IssuesResult{
+		Issues:      make([]github.Issue, 0),
+		RateLimit:   rateLimit,
+		FailedRepos: make([]RepositoryError, 0),
+	}
+
 
 	// Fetch issues from repositories with exclusion filtering
 	allIssues, rl := fetchIssuesFromRepositories(client, repos, setting.ExcludedIssuesRepositories)
@@ -171,12 +232,16 @@ func fetchIssuesFromRepositories(client *github.Client, repos []github.Repositor
 		// Get issues for this repository
 		issues, rl, err := client.GetAllRepositoryIssues(owner, repoName)
 		if err != nil {
-			// Skip repositories with errors (e.g., permission issues)
+			// Collect error instead of silently skipping
+			result.FailedRepos = append(result.FailedRepos, RepositoryError{
+				RepositoryName: repo.FullName,
+				Error:          err,
+			})
 			continue
 		}
 
 		if rl != nil {
-			rateLimit = rl
+			result.RateLimit = rl
 		}
 
 		// Add repository info to each issue
@@ -186,10 +251,13 @@ func fetchIssuesFromRepositories(client *github.Client, repos []github.Repositor
 			}
 		}
 
-		allIssues = append(allIssues, issues...)
+		result.Issues = append(result.Issues, issues...)
 	}
+	return result, nil
+}
 
-	return allIssues, rateLimit
+func splitRepoFullName(fullName string) []string {
+	return strings.SplitN(fullName, "/", 2)
 }
 
 func (u *IssuesUsecase) filterExcludedRepositories(issues []github.Issue, excludedRepos []string) []github.Issue {
