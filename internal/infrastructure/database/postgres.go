@@ -25,9 +25,9 @@ func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entit
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (guild_id, channel_id, user_id)
 		DO UPDATE SET encrypted_token = COALESCE(EXCLUDED.encrypted_token, user_settings.encrypted_token),
-		              excluded_repositories = EXCLUDED.excluded_repositories,
-		              excluded_issues_repositories = EXCLUDED.excluded_issues_repositories,
-		              excluded_assign_repositories = EXCLUDED.excluded_assign_repositories,
+		              excluded_repositories = COALESCE(EXCLUDED.excluded_repositories, user_settings.excluded_repositories),
+		              excluded_issues_repositories = COALESCE(EXCLUDED.excluded_issues_repositories, user_settings.excluded_issues_repositories),
+		              excluded_assign_repositories = COALESCE(EXCLUDED.excluded_assign_repositories, user_settings.excluded_assign_repositories),
 		              updated_at = EXCLUDED.updated_at
 	`
 	_, err := r.db.ExecContext(ctx, query,
@@ -35,9 +35,9 @@ func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entit
 		setting.ChannelID,
 		setting.UserID,
 		nullStringIfEmpty(setting.EncryptedToken),
-		pq.Array(setting.ExcludedRepositories),
-		pq.Array(setting.ExcludedIssuesRepositories),
-		pq.Array(setting.ExcludedAssignRepositories),
+		nullArrayIfNil(setting.ExcludedRepositories),
+		nullArrayIfNil(setting.ExcludedIssuesRepositories),
+		nullArrayIfNil(setting.ExcludedAssignRepositories),
 		setting.UpdatedAt,
 	)
 	return err
@@ -48,6 +48,15 @@ func nullStringIfEmpty(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+// nullArrayIfNil は配列がnilの場合にNULLを返し、空配列の場合はそのまま返します
+// これにより、nilの場合は既存の値を保持（COALESCE）し、空配列の場合は明示的にクリアできます
+func nullArrayIfNil(arr []string) interface{} {
+	if arr == nil {
+		return nil
+	}
+	return pq.Array(arr)
 }
 
 func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, channelID, userID string) (*entity.UserSetting, error) {
