@@ -507,12 +507,12 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		for _, failedRepo := range failedRepos {
 			failedRepoNames = append(failedRepoNames, failedRepo.RepositoryName)
 		}
-		failedMsg := fmt.Sprintf("\n\n⚠️ 以下のリポジトリでエラーが発生しました (%d件):\n- %s",
+		failedMsg := fmt.Sprintf("⚠️ 以下のリポジトリでエラーが発生しました (%d件):\n- %s",
 			len(failedRepos),
 			strings.Join(failedRepoNames, "\n- "))
 
 		if len(content) > 0 {
-			content += failedMsg
+			content += "\n\n" + failedMsg
 		} else {
 			content = failedMsg
 		}
