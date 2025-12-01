@@ -35,7 +35,7 @@ const (
 	MsgTokenNotFound         = "❌ トークンが登録されていません。`/setting` でトークンを登録してください。"
 	MsgTokenValidationFailed = "❌ トークンの検証に失敗しました: %s"
 	MsgTokenSaveFailed       = "❌ トークンの保存に失敗しました"
-	MsgInvalidRepoFormat     = "❌ repository は owner/repo 形式、または all を指定してください。"
+	MsgInvalidRepoFormat     = "❌ repository は owner/repo 形式、username 形式、または all を指定してください。"
 	MsgInvalidExcludePattern = "❌ 不正な形式があります: %s\n正しい形式:\n- owner/repo (特定リポジトリ)\n- owner/* (organization全体)\n- owner (owner/*と同じ)"
 	MsgExcludeSaveFailed     = "❌ 除外リポジトリの保存に失敗しました"
 	MsgGitHubAPIError        = "❌ GitHub API エラー: %s"

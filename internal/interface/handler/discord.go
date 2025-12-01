@@ -332,6 +332,118 @@ func (h *DiscordHandler) getModalInputValue(i *discordgo.InteractionCreate, cust
 	return ""
 }
 
+// respondWithError は通常のエラーレスポンスを送信します
+func (h *DiscordHandler) respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: message,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// respondEditWithError はDeferred Responseのエラーメッセージを編集します
+func (h *DiscordHandler) respondEditWithError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &message,
+	})
+}
+
+// respondWithSuccess は成功メッセージを送信します
+func (h *DiscordHandler) respondWithSuccess(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: message,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// respondDeferred はDeferred Responseを送信します（長時間かかる処理の前に呼ぶ）
+func (h *DiscordHandler) respondDeferred(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+}
+
+// repositoryInputType はリポジトリ入力の種類を表します
+type repositoryInputType int
+
+const (
+	repoInputTypeAll repositoryInputType = iota
+	repoInputTypeUser
+	repoInputTypeSpecific
+	repoInputTypeInvalid
+)
+
+// repositoryInput はパースされたリポジトリ入力を表します
+type repositoryInput struct {
+	inputType repositoryInputType
+	owner     string
+	repo      string
+	username  string
+}
+
+// parseRepositoryInput はリポジトリ入力をパースして検証します
+func parseRepositoryInput(repoInput string) repositoryInput {
+	if strings.ToLower(repoInput) == "all" {
+		return repositoryInput{inputType: repoInputTypeAll}
+	}
+
+	parts := strings.Split(repoInput, "/")
+	if len(parts) == 1 {
+		username := strings.TrimSpace(parts[0])
+		if username == "" {
+			return repositoryInput{inputType: repoInputTypeInvalid}
+		}
+		return repositoryInput{
+			inputType: repoInputTypeUser,
+			username:  username,
+		}
+	}
+
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return repositoryInput{
+			inputType: repoInputTypeSpecific,
+			owner:     parts[0],
+			repo:      parts[1],
+		}
+	}
+
+	return repositoryInput{inputType: repoInputTypeInvalid}
+}
+
+// fetchIssuesByRepository はリポジトリ入力に基づいてissuesを取得します
+func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, channelID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, []usecase.RepositoryError, error) {
+	switch input.inputType {
+	case repoInputTypeAll:
+		result, err := h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+		if err != nil {
+			if result != nil {
+				return nil, result.RateLimit, nil, err
+			}
+			return nil, nil, nil, err
+		}
+		return result.Issues, result.RateLimit, result.FailedRepos, nil
+	case repoInputTypeUser:
+		result, err := h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, input.username)
+		if err != nil {
+			if result != nil {
+				return nil, result.RateLimit, nil, err
+			}
+			return nil, nil, nil, err
+		}
+		return result.Issues, result.RateLimit, result.FailedRepos, nil
+	case repoInputTypeSpecific:
+		issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, input.owner, input.repo)
+		return issues, rateLimit, nil, err
+	default:
+		return nil, nil, nil, fmt.Errorf("unexpected repository input type: %d", input.inputType)
+	}
+}
+
 func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	repoInput := ""
@@ -343,14 +455,14 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if repoInput == "" {
-		message := MsgInvalidRepoFormat
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: message,
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
+		h.respondWithError(s, i, MsgInvalidRepoFormat)
+		return
+	}
+
+	// Parse and validate repository input
+	input := parseRepositoryInput(repoInput)
+	if input.inputType == repoInputTypeInvalid {
+		h.respondWithError(s, i, MsgInvalidRepoFormat)
 		return
 	}
 
@@ -361,46 +473,18 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	userID := i.Member.User.ID
 
 	// Defer response for long operations
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
+	h.respondDeferred(s, i)
 
-	var issues []github.Issue
-	var rateLimit *github.RateLimitInfo
-	var err error
-
-	if strings.ToLower(repoInput) == "all" {
-		// Get all repositories' issues
-		issues, rateLimit, err = h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
-	} else {
-		// Get specific repository issues
-		parts := strings.Split(repoInput, "/")
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			message := MsgInvalidRepoFormat
-			s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-				Content: &message,
-			})
-			return
-		}
-
-		owner := parts[0]
-		repo := parts[1]
-		issues, rateLimit, err = h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, owner, repo)
-	}
+	// Fetch issues based on repository input
+	issues, rateLimit, failedRepos, err := h.fetchIssuesByRepository(ctx, guildID, channelID, userID, input)
 
 	if err != nil {
-		message := h.formatIssuesFetchError(err)
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
 		return
 	}
 
 	if len(issues) == 0 {
-		message := MsgNoIssuesFound
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, MsgNoIssuesFound)
 		return
 	}
 
@@ -415,6 +499,23 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		content = fmt.Sprintf(MsgRateLimitWarning,
 			rateLimit.Remaining,
 			rateLimit.ResetAt.Format("15:04:05"))
+	}
+
+	// Add failed repositories warning if any
+	if len(failedRepos) > 0 {
+		failedRepoNames := make([]string, 0, len(failedRepos))
+		for _, failedRepo := range failedRepos {
+			failedRepoNames = append(failedRepoNames, failedRepo.RepositoryName)
+		}
+		failedMsg := fmt.Sprintf("⚠️ 以下のリポジトリでエラーが発生しました (%d件):\n- %s",
+			len(failedRepos),
+			strings.Join(failedRepoNames, "\n- "))
+
+		if len(content) > 0 {
+			content += "\n\n" + failedMsg
+		} else {
+			content = failedMsg
+		}
 	}
 
 	h.respondWithEmbeds(s, i, content, embeds)
@@ -433,18 +534,12 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 
 	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID)
 	if err != nil {
-		message := h.formatIssuesFetchError(err)
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
 		return
 	}
 
 	if len(issues) == 0 {
-		message := MsgNoAssignedIssuesFound
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &message,
-		})
+		h.respondEditWithError(s, i, MsgNoAssignedIssuesFound)
 		return
 	}
 
