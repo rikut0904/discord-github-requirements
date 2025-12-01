@@ -1,5 +1,7 @@
 package handler
 
+import "time"
+
 // Discord Modal IDs
 const (
 	ModalIDToken         = "token_modal"
@@ -47,6 +49,11 @@ const (
 
 // Discord Limits
 const (
-	MaxEmbedsPerMessage      = 10
+	MaxEmbedsPerMessage       = 10
 	RateLimitWarningThreshold = 10
+)
+
+// Timeouts
+const (
+	DefaultContextTimeout = 30 * time.Second // GitHub API calls timeout
 )

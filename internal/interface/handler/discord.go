@@ -149,7 +149,8 @@ func (h *DiscordHandler) showTokenModal(s *discordgo.Session, i *discordgo.Inter
 }
 
 func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
 	guildID := i.GuildID
 	channelID := i.ChannelID
 	userID := i.Member.User.ID
@@ -212,7 +213,8 @@ func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.In
 func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	token := h.getModalInputValue(i, InputIDToken)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
 	guildID := i.GuildID
 	channelID := i.ChannelID
 	userID := i.Member.User.ID
@@ -248,7 +250,8 @@ func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discord
 func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) {
 	excludeText := h.getModalInputValue(i, InputIDExclude)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
 	guildID := i.GuildID
 	channelID := i.ChannelID
 	userID := i.Member.User.ID
@@ -356,7 +359,8 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
 	guildID := i.GuildID
 	channelID := i.ChannelID
 	userID := i.Member.User.ID
@@ -422,7 +426,8 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 }
 
 func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
 	guildID := i.GuildID
 	channelID := i.ChannelID
 	userID := i.Member.User.ID
