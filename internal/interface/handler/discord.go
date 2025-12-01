@@ -396,11 +396,22 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 
 	var issues []github.Issue
 	var rateLimit *github.RateLimitInfo
+	var failedRepos []usecase.RepositoryError
 	var err error
 
 	if strings.ToLower(repoInput) == "all" {
 		// Get all repositories' issues
-		issues, rateLimit, err = h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+		result, resultErr := h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+		if resultErr != nil {
+			err = resultErr
+			if result != nil {
+				rateLimit = result.RateLimit
+			}
+		} else {
+			issues = result.Issues
+			rateLimit = result.RateLimit
+			failedRepos = result.FailedRepos
+		}
 	} else {
 		// Parse repository input
 		parts := strings.Split(repoInput, "/")
@@ -414,7 +425,17 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 				})
 				return
 			}
-			issues, rateLimit, err = h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, username)
+			result, resultErr := h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, username)
+			if resultErr != nil {
+				err = resultErr
+				if result != nil {
+					rateLimit = result.RateLimit
+				}
+			} else {
+				issues = result.Issues
+				rateLimit = result.RateLimit
+				failedRepos = result.FailedRepos
+			}
 		} else if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
 			// Get specific repository issues
 			owner := parts[0]
@@ -456,6 +477,23 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		content = fmt.Sprintf(MsgRateLimitWarning,
 			rateLimit.Remaining,
 			rateLimit.ResetAt.Format("15:04:05"))
+	}
+
+	// Add failed repositories warning if any
+	if len(failedRepos) > 0 {
+		failedRepoNames := make([]string, 0, len(failedRepos))
+		for _, failedRepo := range failedRepos {
+			failedRepoNames = append(failedRepoNames, failedRepo.RepositoryName)
+		}
+		failedMsg := fmt.Sprintf("\n\n⚠️ 以下のリポジトリでエラーが発生しました (%d件):\n- %s",
+			len(failedRepos),
+			strings.Join(failedRepoNames, "\n- "))
+
+		if len(content) > 0 {
+			content += failedMsg
+		} else {
+			content = failedMsg
+		}
 	}
 
 	h.respondWithEmbeds(s, i, content, embeds)
