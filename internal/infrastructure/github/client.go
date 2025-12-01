@@ -156,13 +156,13 @@ func (c *Client) ValidateToken() error {
 }
 
 func (c *Client) GetAllAssignedIssues() ([]Issue, *RateLimitInfo, error) {
-	return c.collectAllIssues(func(page int) ([]Issue, *RateLimitInfo, error) {
+	return collectAllPages(func(page int) ([]Issue, *RateLimitInfo, error) {
 		return c.GetAssignedIssues(page, maxPerPage)
 	})
 }
 
 func (c *Client) GetAllRepositoryIssues(owner, repo string) ([]Issue, *RateLimitInfo, error) {
-	return c.collectAllIssues(func(page int) ([]Issue, *RateLimitInfo, error) {
+	return collectAllPages(func(page int) ([]Issue, *RateLimitInfo, error) {
 		return c.GetRepositoryIssues(owner, repo, page, maxPerPage)
 	})
 }
@@ -202,12 +202,13 @@ func (c *Client) GetUserRepositories(page, perPage int) ([]Repository, *RateLimi
 	return repos, rateLimit, nil
 }
 
-func (c *Client) GetAllUserRepositories() ([]Repository, *RateLimitInfo, error) {
-	var allRepos []Repository
+// collectAllPages は汎用的なページネーション処理を行います
+func collectAllPages[T any](fetch func(page int) ([]T, *RateLimitInfo, error)) ([]T, *RateLimitInfo, error) {
+	var allItems []T
 	var lastRateLimit *RateLimitInfo
 
 	for page := 1; ; page++ {
-		repos, rateLimit, err := c.GetUserRepositories(page, maxPerPage)
+		items, rateLimit, err := fetch(page)
 		if err != nil {
 			return nil, rateLimit, err
 		}
@@ -216,14 +217,20 @@ func (c *Client) GetAllUserRepositories() ([]Repository, *RateLimitInfo, error) 
 			lastRateLimit = rateLimit
 		}
 
-		allRepos = append(allRepos, repos...)
+		allItems = append(allItems, items...)
 
-		if len(repos) < maxPerPage {
+		if len(items) < maxPerPage {
 			break
 		}
 	}
 
-	return allRepos, lastRateLimit, nil
+	return allItems, lastRateLimit, nil
+}
+
+func (c *Client) GetAllUserRepositories() ([]Repository, *RateLimitInfo, error) {
+	return collectAllPages(func(page int) ([]Repository, *RateLimitInfo, error) {
+		return c.GetUserRepositories(page, maxPerPage)
+	})
 }
 
 // GetSpecificUserRepositories gets all repositories for a specific user
@@ -264,52 +271,11 @@ func (c *Client) GetSpecificUserRepositories(username string, page, perPage int)
 
 // GetAllSpecificUserRepositories gets all repositories for a specific user (all pages)
 func (c *Client) GetAllSpecificUserRepositories(username string) ([]Repository, *RateLimitInfo, error) {
-	var allRepos []Repository
-	var lastRateLimit *RateLimitInfo
-
-	for page := 1; ; page++ {
-		repos, rateLimit, err := c.GetSpecificUserRepositories(username, page, maxPerPage)
-		if err != nil {
-			return nil, rateLimit, err
-		}
-
-		if rateLimit != nil {
-			lastRateLimit = rateLimit
-		}
-
-		allRepos = append(allRepos, repos...)
-
-		if len(repos) < maxPerPage {
-			break
-		}
-	}
-
-	return allRepos, lastRateLimit, nil
+	return collectAllPages(func(page int) ([]Repository, *RateLimitInfo, error) {
+		return c.GetSpecificUserRepositories(username, page, maxPerPage)
+	})
 }
 
-func (c *Client) collectAllIssues(fetch func(page int) ([]Issue, *RateLimitInfo, error)) ([]Issue, *RateLimitInfo, error) {
-	var allIssues []Issue
-	var lastRateLimit *RateLimitInfo
-
-	for page := 1; ; page++ {
-		issues, rateLimit, err := fetch(page)
-		if err != nil {
-			return nil, rateLimit, err
-		}
-
-		if rateLimit != nil {
-			lastRateLimit = rateLimit
-		}
-
-		allIssues = append(allIssues, issues...)
-
-		if len(issues) < maxPerPage {
-			break
-		}
-	}
-
-	return allIssues, lastRateLimit, nil
-}
 
 func parseRateLimit(resp *http.Response) *RateLimitInfo {
 	remaining, _ := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining"))
