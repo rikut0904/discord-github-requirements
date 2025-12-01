@@ -368,6 +368,27 @@ func (h *DiscordHandler) respondDeferred(s *discordgo.Session, i *discordgo.Inte
 	})
 }
 
+// sendEmbedsToChannel は指定されたチャンネルにembedsを送信します
+func (h *DiscordHandler) sendEmbedsToChannel(s *discordgo.Session, channelID string, content string, embeds []*discordgo.MessageEmbed) {
+	// Discordの制限: 1メッセージあたり最大10 embeds
+	for i := 0; i < len(embeds); i += MaxEmbedsPerMessage {
+		end := i + MaxEmbedsPerMessage
+		if end > len(embeds) {
+			end = len(embeds)
+		}
+
+		messageContent := ""
+		if i == 0 && content != "" {
+			messageContent = content
+		}
+
+		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+			Content: messageContent,
+			Embeds:  embeds[i:end],
+		})
+	}
+}
+
 // repositoryInputType はリポジトリ入力の種類を表します
 type repositoryInputType int
 
@@ -416,10 +437,10 @@ func parseRepositoryInput(repoInput string) repositoryInput {
 }
 
 // fetchIssuesByRepository はリポジトリ入力に基づいてissuesを取得します
-func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, channelID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, []usecase.RepositoryError, error) {
+func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, []usecase.RepositoryError, error) {
 	switch input.inputType {
 	case repoInputTypeAll:
-		result, err := h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+		result, err := h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, userID)
 		if err != nil {
 			if result != nil {
 				return nil, result.RateLimit, nil, err
@@ -428,7 +449,7 @@ func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, c
 		}
 		return result.Issues, result.RateLimit, result.FailedRepos, nil
 	case repoInputTypeUser:
-		result, err := h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, input.username)
+		result, err := h.issuesUsecase.GetUserIssues(ctx, guildID, userID, input.username)
 		if err != nil {
 			if result != nil {
 				return nil, result.RateLimit, nil, err
@@ -437,7 +458,7 @@ func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, c
 		}
 		return result.Issues, result.RateLimit, result.FailedRepos, nil
 	case repoInputTypeSpecific:
-		issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, input.owner, input.repo)
+		issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, userID, input.owner, input.repo)
 		return issues, rateLimit, nil, err
 	default:
 		return nil, nil, nil, fmt.Errorf("unexpected repository input type: %d", input.inputType)
@@ -469,14 +490,27 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
 	guildID := i.GuildID
-	channelID := i.ChannelID
+	currentChannelID := i.ChannelID
 	userID := i.Member.User.ID
 
 	// Defer response for long operations
 	h.respondDeferred(s, i)
 
+	// Get user setting to find registered channel
+	setting, err := h.settingUsecase.GetUserSetting(ctx, guildID, userID)
+	if err != nil {
+		h.respondEditWithError(s, i, MsgTokenNotFound)
+		return
+	}
+	if setting == nil {
+		h.respondEditWithError(s, i, MsgTokenNotFound)
+		return
+	}
+
+	registeredChannelID := setting.ChannelID
+
 	// Fetch issues based on repository input
-	issues, rateLimit, failedRepos, err := h.fetchIssuesByRepository(ctx, guildID, channelID, userID, input)
+	issues, rateLimit, failedRepos, err := h.fetchIssuesByRepository(ctx, guildID, userID, input)
 
 	if err != nil {
 		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
@@ -518,21 +552,42 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		}
 	}
 
-	h.respondWithEmbeds(s, i, content, embeds)
+	// Send completion message to the channel where command was executed
+	completionMsg := "✅ Issue一覧を取得しました。"
+	if currentChannelID != registeredChannelID {
+		completionMsg = fmt.Sprintf("✅ Issue一覧を取得しました。結果は <#%s> に送信されました。", registeredChannelID)
+	}
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &completionMsg,
+	})
+
+	// Send issues to registered channel
+	h.sendEmbedsToChannel(s, registeredChannelID, content, embeds)
 }
 
 func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
 	guildID := i.GuildID
-	channelID := i.ChannelID
+	currentChannelID := i.ChannelID
 	userID := i.Member.User.ID
 
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
+	h.respondDeferred(s, i)
 
-	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID)
+	// Get user setting to find registered channel
+	setting, err := h.settingUsecase.GetUserSetting(ctx, guildID, userID)
+	if err != nil {
+		h.respondEditWithError(s, i, MsgTokenNotFound)
+		return
+	}
+	if setting == nil {
+		h.respondEditWithError(s, i, MsgTokenNotFound)
+		return
+	}
+
+	registeredChannelID := setting.ChannelID
+
+	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, userID)
 	if err != nil {
 		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
 		return
@@ -556,7 +611,17 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 			rateLimit.ResetAt.Format("15:04:05"))
 	}
 
-	h.respondWithEmbeds(s, i, content, embeds)
+	// Send completion message to the channel where command was executed
+	completionMsg := "✅ 割り当てられたIssue一覧を取得しました。"
+	if currentChannelID != registeredChannelID {
+		completionMsg = fmt.Sprintf("✅ 割り当てられたIssue一覧を取得しました。結果は <#%s> に送信されました。", registeredChannelID)
+	}
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &completionMsg,
+	})
+
+	// Send issues to registered channel
+	h.sendEmbedsToChannel(s, registeredChannelID, content, embeds)
 }
 
 func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.InteractionCreate, content string, embeds []*discordgo.MessageEmbed) {

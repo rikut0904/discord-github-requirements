@@ -98,6 +98,46 @@ func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, chann
 	return &setting, nil
 }
 
+func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
+	query := `
+		SELECT guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
+		FROM user_settings
+		WHERE guild_id = $1 AND user_id = $2
+		LIMIT 1
+	`
+	var setting entity.UserSetting
+	var encryptedToken sql.NullString
+	err := r.db.QueryRowContext(ctx, query, guildID, userID).Scan(
+		&setting.GuildID,
+		&setting.ChannelID,
+		&setting.UserID,
+		&encryptedToken,
+		pq.Array(&setting.ExcludedRepositories),
+		pq.Array(&setting.ExcludedIssuesRepositories),
+		pq.Array(&setting.ExcludedAssignRepositories),
+		&setting.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if encryptedToken.Valid {
+		setting.EncryptedToken = encryptedToken.String
+	}
+	if setting.ExcludedRepositories == nil {
+		setting.ExcludedRepositories = []string{}
+	}
+	if setting.ExcludedIssuesRepositories == nil {
+		setting.ExcludedIssuesRepositories = []string{}
+	}
+	if setting.ExcludedAssignRepositories == nil {
+		setting.ExcludedAssignRepositories = []string{}
+	}
+	return &setting, nil
+}
+
 func (r *PostgresUserSettingRepository) Delete(ctx context.Context, guildID, channelID, userID string) error {
 	query := `DELETE FROM user_settings WHERE guild_id = $1 AND channel_id = $2 AND user_id = $3`
 	_, err := r.db.ExecContext(ctx, query, guildID, channelID, userID)

@@ -59,6 +59,10 @@ func (u *SettingUsecase) GetToken(ctx context.Context, guildID, channelID, userI
 	return u.crypto.Decrypt(setting.EncryptedToken)
 }
 
+func (u *SettingUsecase) GetUserSetting(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
+	return u.repo.FindByGuildAndUser(ctx, guildID, userID)
+}
+
 func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, channelID, userID string, repositories []string, commandType string) error {
 	// Validate commandType
 	if commandType != "issues" && commandType != "assign" {

@@ -40,8 +40,8 @@ type IssuesResult struct {
 }
 
 // getDecryptedToken はユーザー設定を取得し、トークンを復号化して返します
-func (u *IssuesUsecase) getDecryptedToken(ctx context.Context, guildID, channelID, userID string) (string, error) {
-	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+func (u *IssuesUsecase) getDecryptedToken(ctx context.Context, guildID, userID string) (string, error) {
+	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
 	if err != nil {
 		return "", err
 	}
@@ -58,8 +58,8 @@ func (u *IssuesUsecase) getDecryptedToken(ctx context.Context, guildID, channelI
 }
 
 // getSettingAndToken はユーザー設定を取得し、トークンを復号化して両方を返します
-func (u *IssuesUsecase) getSettingAndToken(ctx context.Context, guildID, channelID, userID string) (*entity.UserSetting, string, error) {
-	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+func (u *IssuesUsecase) getSettingAndToken(ctx context.Context, guildID, userID string) (*entity.UserSetting, string, error) {
+	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -75,8 +75,8 @@ func (u *IssuesUsecase) getSettingAndToken(ctx context.Context, guildID, channel
 	return setting, token, nil
 }
 
-func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {
-	setting, token, err := u.getSettingAndToken(ctx, guildID, channelID, userID)
+func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {
+	setting, token, err := u.getSettingAndToken(ctx, guildID, userID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -92,8 +92,8 @@ func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, channelI
 	return filteredIssues, rateLimit, nil
 }
 
-func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channelID, userID, owner, repo string) ([]github.Issue, *github.RateLimitInfo, error) {
-	token, err := u.getDecryptedToken(ctx, guildID, channelID, userID)
+func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, userID, owner, repo string) ([]github.Issue, *github.RateLimitInfo, error) {
+	token, err := u.getDecryptedToken(ctx, guildID, userID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -111,8 +111,8 @@ func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, channe
 	return issues, rateLimit, err
 }
 
-func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, channelID, userID string) (*IssuesResult, error) {
-	setting, token, err := u.getSettingAndToken(ctx, guildID, channelID, userID)
+func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, userID string) (*IssuesResult, error) {
+	setting, token, err := u.getSettingAndToken(ctx, guildID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,8 +130,8 @@ func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, c
 	return result, nil
 }
 
-func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, channelID, userID, username string) (*IssuesResult, error) {
-	setting, token, err := u.getSettingAndToken(ctx, guildID, channelID, userID)
+func (u *IssuesUsecase) GetUserIssues(ctx context.Context, guildID, userID, username string) (*IssuesResult, error) {
+	setting, token, err := u.getSettingAndToken(ctx, guildID, userID)
 	if err != nil {
 		return nil, err
 	}
