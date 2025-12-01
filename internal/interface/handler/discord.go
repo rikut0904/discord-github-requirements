@@ -210,16 +210,7 @@ func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.In
 }
 
 func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	var token string
-	for _, comp := range i.ModalSubmitData().Components {
-		if row, ok := comp.(*discordgo.ActionsRow); ok {
-			for _, rowComp := range row.Components {
-				if input, ok := rowComp.(*discordgo.TextInput); ok && input.CustomID == InputIDToken {
-					token = input.Value
-				}
-			}
-		}
-	}
+	token := h.getModalInputValue(i, InputIDToken)
 
 	ctx := context.Background()
 	guildID := i.GuildID
@@ -255,16 +246,7 @@ func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discord
 }
 
 func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) {
-	var excludeText string
-	for _, comp := range i.ModalSubmitData().Components {
-		if row, ok := comp.(*discordgo.ActionsRow); ok {
-			for _, rowComp := range row.Components {
-				if input, ok := rowComp.(*discordgo.TextInput); ok && input.CustomID == InputIDExclude {
-					excludeText = input.Value
-				}
-			}
-		}
-	}
+	excludeText := h.getModalInputValue(i, InputIDExclude)
 
 	ctx := context.Background()
 	guildID := i.GuildID
@@ -336,6 +318,20 @@ func (h *DiscordHandler) formatIssuesFetchError(err error) string {
 		return fmt.Sprintf(MsgGitHubAPIError, ghErr.Message)
 	}
 	return MsgIssueFetchFailed
+}
+
+// getModalInputValue はモーダルから指定されたCustomIDの値を取得します
+func (h *DiscordHandler) getModalInputValue(i *discordgo.InteractionCreate, customID string) string {
+	for _, comp := range i.ModalSubmitData().Components {
+		if row, ok := comp.(*discordgo.ActionsRow); ok {
+			for _, rowComp := range row.Components {
+				if input, ok := rowComp.(*discordgo.TextInput); ok && input.CustomID == customID {
+					return input.Value
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
