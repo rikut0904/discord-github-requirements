@@ -327,6 +327,17 @@ func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *disco
 	})
 }
 
+// formatIssuesFetchError は Issue 取得時のエラーを適切なメッセージに変換します
+func (h *DiscordHandler) formatIssuesFetchError(err error) string {
+	if err == usecase.ErrTokenNotFound {
+		return MsgTokenNotFound
+	}
+	if ghErr, ok := err.(*github.GitHubError); ok {
+		return fmt.Sprintf(MsgGitHubAPIError, ghErr.Message)
+	}
+	return MsgIssueFetchFailed
+}
+
 func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	repoInput := ""
@@ -383,15 +394,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if err != nil {
-		var message string
-		if err == usecase.ErrTokenNotFound {
-			message = MsgTokenNotFound
-		} else if ghErr, ok := err.(*github.GitHubError); ok {
-			message = fmt.Sprintf(MsgGitHubAPIError, ghErr.Message)
-		} else {
-			message = MsgIssueFetchFailed
-		}
-
+		message := h.formatIssuesFetchError(err)
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 			Content: &message,
 		})
@@ -434,15 +437,7 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 
 	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID)
 	if err != nil {
-		var message string
-		if err == usecase.ErrTokenNotFound {
-			message = MsgTokenNotFound
-		} else if ghErr, ok := err.(*github.GitHubError); ok {
-			message = fmt.Sprintf(MsgGitHubAPIError, ghErr.Message)
-		} else {
-			message = MsgIssueFetchFailed
-		}
-
+		message := h.formatIssuesFetchError(err)
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 			Content: &message,
 		})
