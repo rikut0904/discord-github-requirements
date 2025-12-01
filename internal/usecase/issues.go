@@ -154,19 +154,7 @@ func (u *IssuesUsecase) GetAllRepositoriesIssues(ctx context.Context, guildID, c
 }
 
 func splitRepoFullName(fullName string) []string {
-	parts := make([]string, 0, 2)
-	slashIndex := -1
-	for i, ch := range fullName {
-		if ch == '/' {
-			slashIndex = i
-			break
-		}
-	}
-	if slashIndex > 0 && slashIndex < len(fullName)-1 {
-		parts = append(parts, fullName[:slashIndex])
-		parts = append(parts, fullName[slashIndex+1:])
-	}
-	return parts
+	return strings.SplitN(fullName, "/", 2)
 }
 
 func (u *IssuesUsecase) filterExcludedRepositories(issues []github.Issue, excludedRepos []string) []github.Issue {
