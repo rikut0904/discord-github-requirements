@@ -117,7 +117,27 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 		h.showExcludeModal(s, i, CommandTypeIssues)
 	case "exclude_assign":
 		h.showExcludeModal(s, i, CommandTypeAssign)
+	case "notification_channel":
+		h.handleNotificationChannelSetting(s, i)
 	}
+}
+
+func (h *DiscordHandler) handleNotificationChannelSetting(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
+
+	guildID := i.GuildID
+	channelID := i.ChannelID
+	userID := i.Member.User.ID
+
+	// 現在のチャンネルを通知チャンネルとして保存
+	err := h.settingUsecase.SaveNotificationChannel(ctx, guildID, channelID, userID, channelID)
+	if err != nil {
+		h.respondWithError(s, i, "❌ 通知チャンネルの設定に失敗しました")
+		return
+	}
+
+	h.respondWithSuccess(s, i, fmt.Sprintf("✅ このチャンネル (<#%s>) を通知チャンネルとして設定しました。", channelID))
 }
 
 func (h *DiscordHandler) showTokenModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -496,7 +516,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 	// Defer response for long operations
 	h.respondDeferred(s, i)
 
-	// Get user setting to find registered channel
+	// Get user setting to find notification channel
 	setting, err := h.settingUsecase.GetUserSetting(ctx, guildID, userID)
 	if err != nil {
 		h.respondEditWithError(s, i, MsgTokenNotFound)
@@ -507,7 +527,13 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
-	registeredChannelID := setting.ChannelID
+	// 通知チャンネルが設定されていない場合はエラー
+	if setting.NotificationChannelID == "" {
+		h.respondEditWithError(s, i, "❌ 通知チャンネルが設定されていません。`/setting action:notification_channel` で通知チャンネルを設定してください。")
+		return
+	}
+
+	notificationChannelID := setting.NotificationChannelID
 
 	// Fetch issues based on repository input
 	issues, rateLimit, failedRepos, err := h.fetchIssuesByRepository(ctx, guildID, userID, input)
@@ -554,15 +580,15 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 
 	// Send completion message to the channel where command was executed
 	completionMsg := "✅ Issue一覧を取得しました。"
-	if currentChannelID != registeredChannelID {
-		completionMsg = fmt.Sprintf("✅ Issue一覧を取得しました。結果は <#%s> に送信されました。", registeredChannelID)
+	if currentChannelID != notificationChannelID {
+		completionMsg = fmt.Sprintf("✅ Issue一覧を取得しました。結果は <#%s> に送信されました。", notificationChannelID)
 	}
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &completionMsg,
 	})
 
-	// Send issues to registered channel
-	h.sendEmbedsToChannel(s, registeredChannelID, content, embeds)
+	// Send issues to notification channel
+	h.sendEmbedsToChannel(s, notificationChannelID, content, embeds)
 }
 
 func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -574,7 +600,7 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 
 	h.respondDeferred(s, i)
 
-	// Get user setting to find registered channel
+	// Get user setting to find notification channel
 	setting, err := h.settingUsecase.GetUserSetting(ctx, guildID, userID)
 	if err != nil {
 		h.respondEditWithError(s, i, MsgTokenNotFound)
@@ -585,7 +611,13 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
-	registeredChannelID := setting.ChannelID
+	// 通知チャンネルが設定されていない場合はエラー
+	if setting.NotificationChannelID == "" {
+		h.respondEditWithError(s, i, "❌ 通知チャンネルが設定されていません。`/setting action:notification_channel` で通知チャンネルを設定してください。")
+		return
+	}
+
+	notificationChannelID := setting.NotificationChannelID
 
 	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, userID)
 	if err != nil {
@@ -613,15 +645,15 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 
 	// Send completion message to the channel where command was executed
 	completionMsg := "✅ 割り当てられたIssue一覧を取得しました。"
-	if currentChannelID != registeredChannelID {
-		completionMsg = fmt.Sprintf("✅ 割り当てられたIssue一覧を取得しました。結果は <#%s> に送信されました。", registeredChannelID)
+	if currentChannelID != notificationChannelID {
+		completionMsg = fmt.Sprintf("✅ 割り当てられたIssue一覧を取得しました。結果は <#%s> に送信されました。", notificationChannelID)
 	}
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &completionMsg,
 	})
 
-	// Send issues to registered channel
-	h.sendEmbedsToChannel(s, registeredChannelID, content, embeds)
+	// Send issues to notification channel
+	h.sendEmbedsToChannel(s, notificationChannelID, content, embeds)
 }
 
 func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.InteractionCreate, content string, embeds []*discordgo.MessageEmbed) {

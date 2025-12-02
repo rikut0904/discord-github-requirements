@@ -63,6 +63,25 @@ func (u *SettingUsecase) GetUserSetting(ctx context.Context, guildID, userID str
 	return u.repo.FindByGuildAndUser(ctx, guildID, userID)
 }
 
+func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, channelID, userID, notificationChannelID string) error {
+	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+	if err != nil {
+		return err
+	}
+	if setting == nil {
+		setting = &entity.UserSetting{
+			GuildID:   guildID,
+			ChannelID: channelID,
+			UserID:    userID,
+		}
+	}
+
+	setting.NotificationChannelID = notificationChannelID
+	setting.UpdatedAt = time.Now()
+
+	return u.repo.Save(ctx, setting)
+}
+
 func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, channelID, userID string, repositories []string, commandType string) error {
 	// Validate commandType
 	if commandType != "issues" && commandType != "assign" {

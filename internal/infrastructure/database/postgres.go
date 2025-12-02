@@ -21,13 +21,14 @@ func NewPostgresUserSettingRepository(db *sql.DB) repository.UserSettingReposito
 
 func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entity.UserSetting) error {
 	query := `
-		INSERT INTO user_settings (guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO user_settings (guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, notification_channel_id, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (guild_id, channel_id, user_id)
 		DO UPDATE SET encrypted_token = COALESCE(EXCLUDED.encrypted_token, user_settings.encrypted_token),
 		              excluded_repositories = COALESCE(EXCLUDED.excluded_repositories, user_settings.excluded_repositories),
 		              excluded_issues_repositories = COALESCE(EXCLUDED.excluded_issues_repositories, user_settings.excluded_issues_repositories),
 		              excluded_assign_repositories = COALESCE(EXCLUDED.excluded_assign_repositories, user_settings.excluded_assign_repositories),
+		              notification_channel_id = COALESCE(EXCLUDED.notification_channel_id, user_settings.notification_channel_id),
 		              updated_at = EXCLUDED.updated_at
 	`
 	_, err := r.db.ExecContext(ctx, query,
@@ -38,6 +39,7 @@ func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entit
 		nullArrayIfNil(setting.ExcludedRepositories),
 		nullArrayIfNil(setting.ExcludedIssuesRepositories),
 		nullArrayIfNil(setting.ExcludedAssignRepositories),
+		nullStringIfEmpty(setting.NotificationChannelID),
 		setting.UpdatedAt,
 	)
 	return err
@@ -61,12 +63,13 @@ func nullArrayIfNil(arr []string) interface{} {
 
 func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, channelID, userID string) (*entity.UserSetting, error) {
 	query := `
-		SELECT guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
+		SELECT guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, notification_channel_id, updated_at
 		FROM user_settings
 		WHERE guild_id = $1 AND channel_id = $2 AND user_id = $3
 	`
 	var setting entity.UserSetting
 	var encryptedToken sql.NullString
+	var notificationChannelID sql.NullString
 	err := r.db.QueryRowContext(ctx, query, guildID, channelID, userID).Scan(
 		&setting.GuildID,
 		&setting.ChannelID,
@@ -75,6 +78,7 @@ func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, chann
 		pq.Array(&setting.ExcludedRepositories),
 		pq.Array(&setting.ExcludedIssuesRepositories),
 		pq.Array(&setting.ExcludedAssignRepositories),
+		&notificationChannelID,
 		&setting.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -85,6 +89,9 @@ func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, chann
 	}
 	if encryptedToken.Valid {
 		setting.EncryptedToken = encryptedToken.String
+	}
+	if notificationChannelID.Valid {
+		setting.NotificationChannelID = notificationChannelID.String
 	}
 	if setting.ExcludedRepositories == nil {
 		setting.ExcludedRepositories = []string{}
@@ -100,13 +107,14 @@ func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, chann
 
 func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
 	query := `
-		SELECT guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
+		SELECT guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, notification_channel_id, updated_at
 		FROM user_settings
 		WHERE guild_id = $1 AND user_id = $2
 		LIMIT 1
 	`
 	var setting entity.UserSetting
 	var encryptedToken sql.NullString
+	var notificationChannelID sql.NullString
 	err := r.db.QueryRowContext(ctx, query, guildID, userID).Scan(
 		&setting.GuildID,
 		&setting.ChannelID,
@@ -115,6 +123,7 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 		pq.Array(&setting.ExcludedRepositories),
 		pq.Array(&setting.ExcludedIssuesRepositories),
 		pq.Array(&setting.ExcludedAssignRepositories),
+		&notificationChannelID,
 		&setting.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -125,6 +134,9 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 	}
 	if encryptedToken.Valid {
 		setting.EncryptedToken = encryptedToken.String
+	}
+	if notificationChannelID.Valid {
+		setting.NotificationChannelID = notificationChannelID.String
 	}
 	if setting.ExcludedRepositories == nil {
 		setting.ExcludedRepositories = []string{}
