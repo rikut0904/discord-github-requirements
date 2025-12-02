@@ -41,6 +41,10 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 							Value: "token",
 						},
 						{
+							Name:  "通知チャンネル設定",
+							Value: "notification_channel",
+						},
+						{
 							Name:  "/issues用 除外リポジトリ設定",
 							Value: "exclude_issues",
 						},
