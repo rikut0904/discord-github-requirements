@@ -617,10 +617,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
-	notificationChannelID := setting.NotificationIssuesChannelID
-	if notificationChannelID == "" {
-		notificationChannelID = setting.NotificationChannelID // 互換性維持のためのフォールバック
-	}
+	notificationChannelID := setting.NotificationChannelForIssues()
 	if notificationChannelID == "" {
 		h.respondEditWithError(s, i, "❌ /issues用通知チャンネルが設定されていません。`/setting action:notification_channel notification_scope:issues` で設定してください。")
 		return
@@ -702,10 +699,7 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
-	notificationChannelID := setting.NotificationAssignChannelID
-	if notificationChannelID == "" {
-		notificationChannelID = setting.NotificationChannelID // 互換性維持のためのフォールバック
-	}
+	notificationChannelID := setting.NotificationChannelForAssign()
 	if notificationChannelID == "" {
 		h.respondEditWithError(s, i, "❌ /assign用通知チャンネルが設定されていません。`/setting action:notification_channel notification_scope:assign` で設定してください。")
 		return
