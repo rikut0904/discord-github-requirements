@@ -92,16 +92,22 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 		setting.ChannelID = channelID
 	}
 
+	var scopes []string
 	switch commandType {
 	case "issues":
-		setting.NotificationIssuesChannelID = notificationChannelID
+		scopes = []string{"issues"}
 	case "assign":
-		setting.NotificationAssignChannelID = notificationChannelID
+		scopes = []string{"assign"}
 	default:
-		setting.NotificationChannelID = notificationChannelID
-		setting.NotificationIssuesChannelID = notificationChannelID
-		setting.NotificationAssignChannelID = notificationChannelID
+		scopes = []string{"all", "issues", "assign"}
 	}
+
+	for _, scope := range scopes {
+		if err := u.repo.SaveNotificationChannelSetting(ctx, guildID, userID, scope, notificationChannelID); err != nil {
+			return err
+		}
+	}
+
 	setting.UpdatedAt = time.Now()
 
 	return u.repo.Save(ctx, setting)
