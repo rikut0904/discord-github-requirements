@@ -107,6 +107,10 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 	return u.repo.Save(ctx, setting)
 }
 
+func (u *SettingUsecase) ClearNotificationChannels(ctx context.Context, guildID, userID string) error {
+	return u.repo.ClearNotificationChannels(ctx, guildID, userID)
+}
+
 func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, channelID, userID string, repositories []string, commandType string) error {
 	// Validate commandType
 	if commandType != "issues" && commandType != "assign" {

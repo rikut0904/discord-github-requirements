@@ -36,42 +36,23 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 					Description: "設定の種類",
 					Required:    true,
 					Choices: []*discordgo.ApplicationCommandOptionChoice{
-						{
-							Name:  "トークン設定",
-							Value: "token",
-						},
-						{
-							Name:  "通知チャンネル設定",
-							Value: "notification_channel",
-						},
-						{
-							Name:  "/issues用 除外リポジトリ設定",
-							Value: "exclude_issues",
-						},
-						{
-							Name:  "/assign用 除外リポジトリ設定",
-							Value: "exclude_assign",
-						},
+						{Name: "トークン設定", Value: "token"},
+						{Name: "通知チャンネル設定", Value: "notification_channel"},
+						{Name: "/issues用 除外リポジトリ設定", Value: "exclude_issues"},
+						{Name: "/assign用 除外リポジトリ設定", Value: "exclude_assign"},
 					},
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "notification_scope",
-					Description: "通知チャンネル設定の対象 (all:共通 / issues / assign)",
+					Description: "通知チャンネル設定の対象/操作 (all・issues・assign・confirm・clear)",
 					Required:    false,
 					Choices: []*discordgo.ApplicationCommandOptionChoice{
-						{
-							Name:  "all (共通)",
-							Value: "all",
-						},
-						{
-							Name:  "issues のみ",
-							Value: "issues",
-						},
-						{
-							Name:  "assign のみ",
-							Value: "assign",
-						},
+						{Name: "all (共通)", Value: "all"},
+						{Name: "issues のみ", Value: "issues"},
+						{Name: "assign のみ", Value: "assign"},
+						{Name: "確認", Value: "confirm"},
+						{Name: "解除", Value: "clear"},
 					},
 				},
 			},
@@ -130,10 +111,10 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 	notificationScope := "all"
 
 	for _, opt := range options {
-		if opt.Name == "action" {
+		switch opt.Name {
+		case "action":
 			action = opt.StringValue()
-		}
-		if opt.Name == "notification_scope" {
+		case "notification_scope":
 			notificationScope = opt.StringValue()
 		}
 	}
@@ -141,21 +122,27 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 	switch action {
 	case "token":
 		h.showTokenModal(s, i)
+	case "notification_channel":
+		switch notificationScope {
+		case "confirm":
+			h.handleNotificationChannelConfirm(s, i)
+			return
+		case "clear":
+			h.handleNotificationChannelClear(s, i)
+			return
+		case CommandTypeIssues:
+			h.handleNotificationChannelSetting(s, i, CommandTypeIssues)
+		case CommandTypeAssign:
+			h.handleNotificationChannelSetting(s, i, CommandTypeAssign)
+		default:
+			h.handleNotificationChannelSetting(s, i, "")
+		}
 	case "exclude_issues":
 		h.showExcludeModal(s, i, CommandTypeIssues)
 	case "exclude_assign":
 		h.showExcludeModal(s, i, CommandTypeAssign)
-	case "notification_channel":
-		var commandType string
-		switch notificationScope {
-		case CommandTypeIssues:
-			commandType = CommandTypeIssues
-		case CommandTypeAssign:
-			commandType = CommandTypeAssign
-		default:
-			commandType = ""
-		}
-		h.handleNotificationChannelSetting(s, i, commandType)
+	default:
+		h.respondWithError(s, i, "❌ 未対応のアクションです。")
 	}
 }
 
@@ -185,6 +172,62 @@ func (h *DiscordHandler) handleNotificationChannelSetting(s *discordgo.Session, 
 	}
 
 	h.respondWithSuccess(s, i, message)
+}
+
+func (h *DiscordHandler) handleNotificationChannelConfirm(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
+
+	guildID := i.GuildID
+	userID := i.Member.User.ID
+
+	setting, err := h.settingUsecase.GetUserSetting(ctx, guildID, userID)
+	if err != nil {
+		h.respondWithError(s, i, "❌ 通知チャンネル情報の取得に失敗しました")
+		return
+	}
+
+	var (
+		commonChannel string
+		issuesChannel string
+		assignChannel string
+	)
+
+	if setting != nil {
+		commonChannel = setting.NotificationChannelID
+		issuesChannel = setting.NotificationIssuesChannelID
+		assignChannel = setting.NotificationAssignChannelID
+
+		if issuesChannel == "" {
+			issuesChannel = commonChannel
+		}
+		if assignChannel == "" {
+			assignChannel = commonChannel
+		}
+	}
+
+	message := fmt.Sprintf("📋 通知チャンネル設定状況:\n- /issues: %s\n- /assign: %s\n- 共通(旧設定): %s",
+		formatChannelMention(issuesChannel),
+		formatChannelMention(assignChannel),
+		formatChannelMention(commonChannel),
+	)
+
+	h.respondWithSuccess(s, i, message)
+}
+
+func (h *DiscordHandler) handleNotificationChannelClear(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
+
+	guildID := i.GuildID
+	userID := i.Member.User.ID
+
+	if err := h.settingUsecase.ClearNotificationChannels(ctx, guildID, userID); err != nil {
+		h.respondWithError(s, i, "❌ 通知チャンネル設定の解除に失敗しました")
+		return
+	}
+
+	h.respondWithSuccess(s, i, "🧹 通知チャンネル設定をすべて解除しました。")
 }
 
 func (h *DiscordHandler) showTokenModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -579,7 +622,7 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		notificationChannelID = setting.NotificationChannelID // 互換性維持のためのフォールバック
 	}
 	if notificationChannelID == "" {
-		h.respondEditWithError(s, i, "❌ /issues用通知チャンネルが設定されていません。`/setting action:notification_channel_issues` で設定してください。")
+		h.respondEditWithError(s, i, "❌ /issues用通知チャンネルが設定されていません。`/setting action:notification_channel notification_scope:issues` で設定してください。")
 		return
 	}
 
@@ -664,7 +707,7 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 		notificationChannelID = setting.NotificationChannelID // 互換性維持のためのフォールバック
 	}
 	if notificationChannelID == "" {
-		h.respondEditWithError(s, i, "❌ /assign用通知チャンネルが設定されていません。`/setting action:notification_channel_assign` で設定してください。")
+		h.respondEditWithError(s, i, "❌ /assign用通知チャンネルが設定されていません。`/setting action:notification_channel notification_scope:assign` で設定してください。")
 		return
 	}
 
@@ -768,6 +811,13 @@ func isValidExcludePattern(pattern string) bool {
 	}
 
 	return false
+}
+
+func formatChannelMention(channelID string) string {
+	if channelID == "" {
+		return "未設定"
+	}
+	return fmt.Sprintf("<#%s>", channelID)
 }
 
 func createIssueEmbed(issue github.Issue) *discordgo.MessageEmbed {

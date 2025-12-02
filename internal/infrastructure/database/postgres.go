@@ -241,6 +241,21 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 	return aggregated, nil
 }
 
+func (r *PostgresUserSettingRepository) ClearNotificationChannels(ctx context.Context, guildID, userID string) error {
+	query := `
+		UPDATE user_settings
+		SET
+			notification_channel_id = NULL,
+			notification_issues_channel_id = NULL,
+			notification_assign_channel_id = NULL,
+			updated_at = $3
+		WHERE guild_id = $1 AND user_id = $2
+	`
+
+	_, err := r.db.ExecContext(ctx, query, guildID, userID, time.Now())
+	return err
+}
+
 func (r *PostgresUserSettingRepository) Delete(ctx context.Context, guildID, channelID, userID string) error {
 	query := `DELETE FROM user_settings WHERE guild_id = $1 AND channel_id = $2 AND user_id = $3`
 	_, err := r.db.ExecContext(ctx, query, guildID, channelID, userID)
