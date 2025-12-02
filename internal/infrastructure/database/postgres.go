@@ -151,31 +151,15 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 			currentSetting.EncryptedToken = encryptedToken.String
 		}
 		if aggregated == nil {
-			aggregated = &entity.UserSetting{
-				GuildID:                    currentSetting.GuildID,
-				ChannelID:                  currentSetting.ChannelID,
-				UserID:                     currentSetting.UserID,
-				EncryptedToken:             currentSetting.EncryptedToken,
-				ExcludedRepositories:       currentSetting.ExcludedRepositories,
-				ExcludedIssuesRepositories: currentSetting.ExcludedIssuesRepositories,
-				ExcludedAssignRepositories: currentSetting.ExcludedAssignRepositories,
-				UpdatedAt:                  currentSetting.UpdatedAt,
-			}
+			copySetting := currentSetting
+			aggregated = &copySetting
 			continue
 		}
 
-		if aggregated.EncryptedToken == "" && currentSetting.EncryptedToken != "" {
-			aggregated.EncryptedToken = currentSetting.EncryptedToken
-		}
-		if aggregated.ExcludedRepositories == nil && currentSetting.ExcludedRepositories != nil {
-			aggregated.ExcludedRepositories = currentSetting.ExcludedRepositories
-		}
-		if aggregated.ExcludedIssuesRepositories == nil && currentSetting.ExcludedIssuesRepositories != nil {
-			aggregated.ExcludedIssuesRepositories = currentSetting.ExcludedIssuesRepositories
-		}
-		if aggregated.ExcludedAssignRepositories == nil && currentSetting.ExcludedAssignRepositories != nil {
-			aggregated.ExcludedAssignRepositories = currentSetting.ExcludedAssignRepositories
-		}
+		mergeStringField(&aggregated.EncryptedToken, currentSetting.EncryptedToken)
+		mergeStringSliceField(&aggregated.ExcludedRepositories, currentSetting.ExcludedRepositories)
+		mergeStringSliceField(&aggregated.ExcludedIssuesRepositories, currentSetting.ExcludedIssuesRepositories)
+		mergeStringSliceField(&aggregated.ExcludedAssignRepositories, currentSetting.ExcludedAssignRepositories)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -279,6 +263,18 @@ func (r *PostgresUserSettingRepository) populateNotificationChannels(ctx context
 	}
 
 	return nil
+}
+
+func mergeStringField(dst *string, src string) {
+	if *dst == "" && src != "" {
+		*dst = src
+	}
+}
+
+func mergeStringSliceField(dst *[]string, src []string) {
+	if *dst == nil && src != nil {
+		*dst = src
+	}
 }
 
 func InitDB(databaseURL string) (*sql.DB, error) {
