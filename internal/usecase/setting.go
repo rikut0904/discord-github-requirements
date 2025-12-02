@@ -63,20 +63,45 @@ func (u *SettingUsecase) GetUserSetting(ctx context.Context, guildID, userID str
 	return u.repo.FindByGuildAndUser(ctx, guildID, userID)
 }
 
-func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, channelID, userID, notificationChannelID string) error {
-	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, channelID, userID, commandType, notificationChannelID string) error {
+	// Allow commandType "", "issues", "assign"
+	if commandType != "" && commandType != "issues" && commandType != "assign" {
+		return fmt.Errorf("invalid commandType: %s (must be '', 'issues' or 'assign')", commandType)
+	}
+
+	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
 	if err != nil {
 		return err
 	}
+
+	if setting == nil {
+		setting, err = u.repo.Find(ctx, guildID, channelID, userID)
+		if err != nil {
+			return err
+		}
+	}
+
 	if setting == nil {
 		setting = &entity.UserSetting{
 			GuildID:   guildID,
 			ChannelID: channelID,
 			UserID:    userID,
 		}
+	} else if setting.ChannelID == "" {
+		// 既存設定があるがchannelIDが不明な場合は現在のチャンネルを設定
+		setting.ChannelID = channelID
 	}
 
-	setting.NotificationChannelID = notificationChannelID
+	switch commandType {
+	case "issues":
+		setting.NotificationIssuesChannelID = notificationChannelID
+	case "assign":
+		setting.NotificationAssignChannelID = notificationChannelID
+	default:
+		setting.NotificationChannelID = notificationChannelID
+		setting.NotificationIssuesChannelID = notificationChannelID
+		setting.NotificationAssignChannelID = notificationChannelID
+	}
 	setting.UpdatedAt = time.Now()
 
 	return u.repo.Save(ctx, setting)

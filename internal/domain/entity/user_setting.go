@@ -10,6 +10,8 @@ type UserSetting struct {
 	ExcludedRepositories         []string // Deprecated: use ExcludedIssuesRepos and ExcludedAssignRepos
 	ExcludedIssuesRepositories   []string
 	ExcludedAssignRepositories   []string
-	NotificationChannelID        string   // Issue通知を送信するチャンネル
+	NotificationChannelID        string   // Deprecated: 共通通知チャンネル
+	NotificationIssuesChannelID  string   // /issues用通知チャンネル
+	NotificationAssignChannelID  string   // /assign用通知チャンネル
 	UpdatedAt                    time.Time
 }

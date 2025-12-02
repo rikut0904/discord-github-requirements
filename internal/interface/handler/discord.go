@@ -45,6 +45,14 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 							Value: "notification_channel",
 						},
 						{
+							Name:  "通知チャンネル設定 (/issues)",
+							Value: "notification_channel_issues",
+						},
+						{
+							Name:  "通知チャンネル設定 (/assign)",
+							Value: "notification_channel_assign",
+						},
+						{
 							Name:  "/issues用 除外リポジトリ設定",
 							Value: "exclude_issues",
 						},
@@ -122,11 +130,15 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 	case "exclude_assign":
 		h.showExcludeModal(s, i, CommandTypeAssign)
 	case "notification_channel":
-		h.handleNotificationChannelSetting(s, i)
+		h.handleNotificationChannelSetting(s, i, "")
+	case "notification_channel_issues":
+		h.handleNotificationChannelSetting(s, i, CommandTypeIssues)
+	case "notification_channel_assign":
+		h.handleNotificationChannelSetting(s, i, CommandTypeAssign)
 	}
 }
 
-func (h *DiscordHandler) handleNotificationChannelSetting(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (h *DiscordHandler) handleNotificationChannelSetting(s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
 
@@ -135,13 +147,23 @@ func (h *DiscordHandler) handleNotificationChannelSetting(s *discordgo.Session, 
 	userID := i.Member.User.ID
 
 	// 現在のチャンネルを通知チャンネルとして保存
-	err := h.settingUsecase.SaveNotificationChannel(ctx, guildID, channelID, userID, channelID)
+	err := h.settingUsecase.SaveNotificationChannel(ctx, guildID, channelID, userID, commandType, channelID)
 	if err != nil {
 		h.respondWithError(s, i, "❌ 通知チャンネルの設定に失敗しました")
 		return
 	}
 
-	h.respondWithSuccess(s, i, fmt.Sprintf("✅ このチャンネル (<#%s>) を通知チャンネルとして設定しました。", channelID))
+	var message string
+	switch commandType {
+	case CommandTypeIssues:
+		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を /issues 用通知チャンネルに設定しました。", channelID)
+	case CommandTypeAssign:
+		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を /assign 用通知チャンネルに設定しました。", channelID)
+	default:
+		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を通知チャンネルとして設定しました（/issues・/assign共通）。", channelID)
+	}
+
+	h.respondWithSuccess(s, i, message)
 }
 
 func (h *DiscordHandler) showTokenModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -531,13 +553,14 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
-	// 通知チャンネルが設定されていない場合はエラー
-	if setting.NotificationChannelID == "" {
-		h.respondEditWithError(s, i, "❌ 通知チャンネルが設定されていません。`/setting action:notification_channel` で通知チャンネルを設定してください。")
+	notificationChannelID := setting.NotificationIssuesChannelID
+	if notificationChannelID == "" {
+		notificationChannelID = setting.NotificationChannelID // 互換性維持のためのフォールバック
+	}
+	if notificationChannelID == "" {
+		h.respondEditWithError(s, i, "❌ /issues用通知チャンネルが設定されていません。`/setting action:notification_channel_issues` で設定してください。")
 		return
 	}
-
-	notificationChannelID := setting.NotificationChannelID
 
 	// Fetch issues based on repository input
 	issues, rateLimit, failedRepos, err := h.fetchIssuesByRepository(ctx, guildID, userID, input)
@@ -615,13 +638,14 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 		return
 	}
 
-	// 通知チャンネルが設定されていない場合はエラー
-	if setting.NotificationChannelID == "" {
-		h.respondEditWithError(s, i, "❌ 通知チャンネルが設定されていません。`/setting action:notification_channel` で通知チャンネルを設定してください。")
+	notificationChannelID := setting.NotificationAssignChannelID
+	if notificationChannelID == "" {
+		notificationChannelID = setting.NotificationChannelID // 互換性維持のためのフォールバック
+	}
+	if notificationChannelID == "" {
+		h.respondEditWithError(s, i, "❌ /assign用通知チャンネルが設定されていません。`/setting action:notification_channel_assign` で設定してください。")
 		return
 	}
-
-	notificationChannelID := setting.NotificationChannelID
 
 	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, userID)
 	if err != nil {
