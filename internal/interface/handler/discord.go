@@ -45,20 +45,32 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 							Value: "notification_channel",
 						},
 						{
-							Name:  "通知チャンネル設定 (/issues)",
-							Value: "notification_channel_issues",
-						},
-						{
-							Name:  "通知チャンネル設定 (/assign)",
-							Value: "notification_channel_assign",
-						},
-						{
 							Name:  "/issues用 除外リポジトリ設定",
 							Value: "exclude_issues",
 						},
 						{
 							Name:  "/assign用 除外リポジトリ設定",
 							Value: "exclude_assign",
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "notification_scope",
+					Description: "通知チャンネル設定の対象 (all:共通 / issues / assign)",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "all (共通)",
+							Value: "all",
+						},
+						{
+							Name:  "issues のみ",
+							Value: "issues",
+						},
+						{
+							Name:  "assign のみ",
+							Value: "assign",
 						},
 					},
 				},
@@ -115,10 +127,14 @@ func (h *DiscordHandler) handleCommand(s *discordgo.Session, i *discordgo.Intera
 func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	action := "token"
+	notificationScope := "all"
 
 	for _, opt := range options {
 		if opt.Name == "action" {
 			action = opt.StringValue()
+		}
+		if opt.Name == "notification_scope" {
+			notificationScope = opt.StringValue()
 		}
 	}
 
@@ -130,11 +146,16 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 	case "exclude_assign":
 		h.showExcludeModal(s, i, CommandTypeAssign)
 	case "notification_channel":
-		h.handleNotificationChannelSetting(s, i, "")
-	case "notification_channel_issues":
-		h.handleNotificationChannelSetting(s, i, CommandTypeIssues)
-	case "notification_channel_assign":
-		h.handleNotificationChannelSetting(s, i, CommandTypeAssign)
+		var commandType string
+		switch notificationScope {
+		case CommandTypeIssues:
+			commandType = CommandTypeIssues
+		case CommandTypeAssign:
+			commandType = CommandTypeAssign
+		default:
+			commandType = ""
+		}
+		h.handleNotificationChannelSetting(s, i, commandType)
 	}
 }
 
