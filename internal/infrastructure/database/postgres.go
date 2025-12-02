@@ -184,16 +184,6 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 		if notificationAssignChannelID.Valid {
 			currentSetting.NotificationAssignChannelID = notificationAssignChannelID.String
 		}
-		if currentSetting.ExcludedRepositories == nil {
-			currentSetting.ExcludedRepositories = []string{}
-		}
-		if currentSetting.ExcludedIssuesRepositories == nil {
-			currentSetting.ExcludedIssuesRepositories = []string{}
-		}
-		if currentSetting.ExcludedAssignRepositories == nil {
-			currentSetting.ExcludedAssignRepositories = []string{}
-		}
-
 		if aggregated == nil {
 			aggregated = &entity.UserSetting{
 				GuildID:                     currentSetting.GuildID,
@@ -214,13 +204,13 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 		if aggregated.EncryptedToken == "" && currentSetting.EncryptedToken != "" {
 			aggregated.EncryptedToken = currentSetting.EncryptedToken
 		}
-		if len(aggregated.ExcludedRepositories) == 0 && len(currentSetting.ExcludedRepositories) > 0 {
+		if aggregated.ExcludedRepositories == nil && currentSetting.ExcludedRepositories != nil {
 			aggregated.ExcludedRepositories = currentSetting.ExcludedRepositories
 		}
-		if len(aggregated.ExcludedIssuesRepositories) == 0 && len(currentSetting.ExcludedIssuesRepositories) > 0 {
+		if aggregated.ExcludedIssuesRepositories == nil && currentSetting.ExcludedIssuesRepositories != nil {
 			aggregated.ExcludedIssuesRepositories = currentSetting.ExcludedIssuesRepositories
 		}
-		if len(aggregated.ExcludedAssignRepositories) == 0 && len(currentSetting.ExcludedAssignRepositories) > 0 {
+		if aggregated.ExcludedAssignRepositories == nil && currentSetting.ExcludedAssignRepositories != nil {
 			aggregated.ExcludedAssignRepositories = currentSetting.ExcludedAssignRepositories
 		}
 		if aggregated.NotificationChannelID == "" && currentSetting.NotificationChannelID != "" {
@@ -236,6 +226,18 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+
+	if aggregated != nil {
+		if aggregated.ExcludedRepositories == nil {
+			aggregated.ExcludedRepositories = []string{}
+		}
+		if aggregated.ExcludedIssuesRepositories == nil {
+			aggregated.ExcludedIssuesRepositories = []string{}
+		}
+		if aggregated.ExcludedAssignRepositories == nil {
+			aggregated.ExcludedAssignRepositories = []string{}
+		}
 	}
 
 	return aggregated, nil
