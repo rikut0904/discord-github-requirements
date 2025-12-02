@@ -135,7 +135,7 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 		case CommandTypeAssign:
 			h.handleNotificationChannelSetting(s, i, CommandTypeAssign)
 		default:
-			h.handleNotificationChannelSetting(s, i, "")
+			h.handleNotificationChannelSetting(s, i, "all")
 		}
 	case "exclude_issues":
 		h.showExcludeModal(s, i, CommandTypeIssues)

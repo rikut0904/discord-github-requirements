@@ -64,9 +64,9 @@ func (u *SettingUsecase) GetUserSetting(ctx context.Context, guildID, userID str
 }
 
 func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, channelID, userID, commandType, notificationChannelID string) error {
-	// Allow commandType "", "issues", "assign"
-	if commandType != "" && commandType != "issues" && commandType != "assign" {
-		return fmt.Errorf("invalid commandType: %s (must be '', 'issues' or 'assign')", commandType)
+	// Allow commandType "", "all", "issues", "assign"
+	if commandType != "" && commandType != "all" && commandType != "issues" && commandType != "assign" {
+		return fmt.Errorf("invalid commandType: %s (must be '', 'all', 'issues' or 'assign')", commandType)
 	}
 
 	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
@@ -98,6 +98,8 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 		scopes = []string{"issues"}
 	case "assign":
 		scopes = []string{"assign"}
+	case "all", "":
+		scopes = []string{"all", "issues", "assign"}
 	default:
 		scopes = []string{"all", "issues", "assign"}
 	}
