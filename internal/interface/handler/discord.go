@@ -834,7 +834,7 @@ func createIssueEmbed(issue github.Issue) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Title:  fmt.Sprintf("#%d %s", issue.Number, issue.Title),
 		URL:    issue.HTMLURL,
-		Color:  0x238636,
+		Color:  ColorGitHubSuccess,
 		Fields: fields,
 	}
 }

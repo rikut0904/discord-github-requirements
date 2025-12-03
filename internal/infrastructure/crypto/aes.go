@@ -6,7 +6,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
+)
+
+const (
+	// RequiredKeyLength is the required length for AES-256 encryption key
+	RequiredKeyLength = 32
 )
 
 type AESCrypto struct {
@@ -15,8 +21,8 @@ type AESCrypto struct {
 
 func NewAESCrypto(key string) (*AESCrypto, error) {
 	keyBytes := []byte(key)
-	if len(keyBytes) != 32 {
-		return nil, errors.New("encryption key must be 32 bytes")
+	if len(keyBytes) != RequiredKeyLength {
+		return nil, fmt.Errorf("encryption key must be %d bytes, got %d bytes", RequiredKeyLength, len(keyBytes))
 	}
 	return &AESCrypto{key: keyBytes}, nil
 }

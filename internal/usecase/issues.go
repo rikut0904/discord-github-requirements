@@ -39,24 +39,6 @@ type IssuesResult struct {
 	FailedRepos  []RepositoryError
 }
 
-// getDecryptedToken はユーザー設定を取得し、トークンを復号化して返します
-func (u *IssuesUsecase) getDecryptedToken(ctx context.Context, guildID, userID string) (string, error) {
-	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
-	if err != nil {
-		return "", err
-	}
-	if setting == nil {
-		return "", ErrTokenNotFound
-	}
-
-	token, err := u.crypto.Decrypt(setting.EncryptedToken)
-	if err != nil {
-		return "", err
-	}
-
-	return token, nil
-}
-
 // getSettingAndToken はユーザー設定を取得し、トークンを復号化して両方を返します
 func (u *IssuesUsecase) getSettingAndToken(ctx context.Context, guildID, userID string) (*entity.UserSetting, string, error) {
 	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
@@ -73,6 +55,12 @@ func (u *IssuesUsecase) getSettingAndToken(ctx context.Context, guildID, userID 
 	}
 
 	return setting, token, nil
+}
+
+// getDecryptedToken はユーザー設定を取得し、トークンを復号化して返します
+func (u *IssuesUsecase) getDecryptedToken(ctx context.Context, guildID, userID string) (string, error) {
+	_, token, err := u.getSettingAndToken(ctx, guildID, userID)
+	return token, err
 }
 
 func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, userID string) ([]github.Issue, *github.RateLimitInfo, error) {

@@ -7,5 +7,3 @@ CREATE TABLE IF NOT EXISTS user_notification_channels (
     PRIMARY KEY (guild_id, user_id, scope),
     CHECK (scope IN ('all', 'issues', 'assign'))
 );
-
-CREATE INDEX idx_user_notification_channels_scope ON user_notification_channels(scope);

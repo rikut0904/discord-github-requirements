@@ -23,6 +23,29 @@ func NewSettingUsecase(repo repository.UserSettingRepository, crypto *crypto.AES
 	}
 }
 
+// ensureSettingWithChannel は設定が存在する場合はchannelIDを更新し、存在しない場合は新規作成します
+func ensureSettingWithChannel(setting *entity.UserSetting, guildID, channelID, userID string) *entity.UserSetting {
+	if setting == nil {
+		return &entity.UserSetting{
+			GuildID:   guildID,
+			ChannelID: channelID,
+			UserID:    userID,
+		}
+	}
+	if setting.ChannelID == "" || setting.ChannelID != channelID {
+		setting.ChannelID = channelID
+	}
+	return setting
+}
+
+// validateIssuesOrAssignType はcommandTypeが"issues"または"assign"であることを検証します
+func validateIssuesOrAssignType(commandType string) error {
+	if commandType != "issues" && commandType != "assign" {
+		return fmt.Errorf("invalid commandType: %s (must be 'issues' or 'assign')", commandType)
+	}
+	return nil
+}
+
 func (u *SettingUsecase) SaveToken(ctx context.Context, guildID, channelID, userID, token string) error {
 	// Validate token with GitHub API
 	client := github.NewClient(token)
@@ -48,7 +71,7 @@ func (u *SettingUsecase) SaveToken(ctx context.Context, guildID, channelID, user
 }
 
 func (u *SettingUsecase) GetToken(ctx context.Context, guildID, channelID, userID string) (string, error) {
-	setting, err := u.repo.Find(ctx, guildID, userID)
+	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
 	if err != nil {
 		return "", err
 	}
@@ -74,18 +97,7 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 		return err
 	}
 
-	if setting == nil {
-	}
-
-	if setting == nil {
-		setting = &entity.UserSetting{
-			GuildID:   guildID,
-			ChannelID: channelID,
-			UserID:    userID,
-		}
-	} else if setting.ChannelID == "" || setting.ChannelID != channelID {
-		setting.ChannelID = channelID
-	}
+	setting = ensureSettingWithChannel(setting, guildID, channelID, userID)
 
 	var scopes []string
 	switch commandType {
@@ -113,24 +125,16 @@ func (u *SettingUsecase) ClearNotificationChannels(ctx context.Context, guildID,
 }
 
 func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, channelID, userID string, repositories []string, commandType string) error {
-	// Validate commandType
-	if commandType != "issues" && commandType != "assign" {
-		return fmt.Errorf("invalid commandType: %s (must be 'issues' or 'assign')", commandType)
+	if err := validateIssuesOrAssignType(commandType); err != nil {
+		return err
 	}
 
-	setting, err := u.repo.Find(ctx, guildID, userID)
+	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
 	if err != nil {
 		return err
 	}
-	if setting == nil {
-		setting = &entity.UserSetting{
-			GuildID:   guildID,
-			ChannelID: channelID,
-			UserID:    userID,
-		}
-	} else if setting.ChannelID == "" || setting.ChannelID != channelID {
-		setting.ChannelID = channelID
-	}
+
+	setting = ensureSettingWithChannel(setting, guildID, channelID, userID)
 
 	if commandType == "issues" {
 		setting.ExcludedIssuesRepositories = repositories
@@ -144,12 +148,11 @@ func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, 
 }
 
 func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, channelID, userID string, commandType string) ([]string, error) {
-	// Validate commandType
-	if commandType != "issues" && commandType != "assign" {
-		return nil, fmt.Errorf("invalid commandType: %s (must be 'issues' or 'assign')", commandType)
+	if err := validateIssuesOrAssignType(commandType); err != nil {
+		return nil, err
 	}
 
-	setting, err := u.repo.Find(ctx, guildID, userID)
+	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
 	if err != nil {
 		return nil, err
 	}

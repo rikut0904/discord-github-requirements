@@ -69,7 +69,15 @@ func nullArrayIfNil(arr []string) interface{} {
 	return pq.Array(arr)
 }
 
-func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
+// ensureEmptyArrayNotNil は配列がnilの場合に空配列を返します
+func ensureEmptyArrayNotNil(arr []string) []string {
+	if arr == nil {
+		return []string{}
+	}
+	return arr
+}
+
+func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
 	query := `
 		SELECT guild_id, user_id, channel_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
 		FROM user_settings
@@ -96,36 +104,15 @@ func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, userI
 	if encryptedToken.Valid {
 		setting.EncryptedToken = encryptedToken.String
 	}
-	if setting.ExcludedRepositories == nil {
-		setting.ExcludedRepositories = []string{}
-	}
-	if setting.ExcludedIssuesRepositories == nil {
-		setting.ExcludedIssuesRepositories = []string{}
-	}
-	if setting.ExcludedAssignRepositories == nil {
-		setting.ExcludedAssignRepositories = []string{}
-	}
+	setting.ExcludedRepositories = ensureEmptyArrayNotNil(setting.ExcludedRepositories)
+	setting.ExcludedIssuesRepositories = ensureEmptyArrayNotNil(setting.ExcludedIssuesRepositories)
+	setting.ExcludedAssignRepositories = ensureEmptyArrayNotNil(setting.ExcludedAssignRepositories)
 
 	if err := r.populateNotificationChannels(ctx, &setting); err != nil {
 		return nil, err
 	}
 
 	return &setting, nil
-}
-
-func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
-	setting, err := r.Find(ctx, guildID, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	if setting != nil {
-		if err := r.populateNotificationChannels(ctx, setting); err != nil {
-			return nil, err
-		}
-	}
-
-	return setting, nil
 }
 
 func (r *PostgresUserSettingRepository) ClearNotificationChannels(ctx context.Context, guildID, userID string) error {
