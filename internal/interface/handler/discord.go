@@ -742,40 +742,6 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 	h.sendEmbedsToChannel(s, notificationChannelID, content, embeds)
 }
 
-func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.InteractionCreate, content string, embeds []*discordgo.MessageEmbed) {
-
-	if len(embeds) == 0 {
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &content,
-		})
-		return
-	}
-
-	firstEmbeds := embeds
-	if len(firstEmbeds) > MaxEmbedsPerMessage {
-		firstEmbeds = embeds[:MaxEmbedsPerMessage]
-	}
-
-	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: &content,
-		Embeds:  &firstEmbeds,
-	})
-
-	for offset := MaxEmbedsPerMessage; offset < len(embeds); offset += MaxEmbedsPerMessage {
-		end := offset + MaxEmbedsPerMessage
-		if end > len(embeds) {
-			end = len(embeds)
-		}
-		chunk := embeds[offset:end]
-		if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-			Embeds: chunk,
-		}); err != nil {
-			fmt.Printf("Failed to send followup message: %v\n", err)
-			break
-		}
-	}
-}
-
 func isValidExcludePattern(pattern string) bool {
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
