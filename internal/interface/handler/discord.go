@@ -195,15 +195,8 @@ func (h *DiscordHandler) handleNotificationChannelConfirm(s *discordgo.Session, 
 
 	if setting != nil {
 		commonChannel = setting.NotificationChannelID
-		issuesChannel = setting.NotificationIssuesChannelID
-		assignChannel = setting.NotificationAssignChannelID
-
-		if issuesChannel == "" {
-			issuesChannel = commonChannel
-		}
-		if assignChannel == "" {
-			assignChannel = commonChannel
-		}
+		issuesChannel = setting.NotificationChannelForIssues()
+		assignChannel = setting.NotificationChannelForAssign()
 	}
 
 	message := fmt.Sprintf("📋 通知チャンネル設定状況:\n- /issues: %s\n- /assign: %s\n- 共通(旧設定): %s",
