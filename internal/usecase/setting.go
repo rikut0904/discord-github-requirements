@@ -93,8 +93,6 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 		scopes = []string{"issues"}
 	case "assign":
 		scopes = []string{"assign"}
-	case "all", "":
-		scopes = []string{"all", "issues", "assign"}
 	default:
 		scopes = []string{"all", "issues", "assign"}
 	}
