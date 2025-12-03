@@ -48,7 +48,7 @@ func (u *SettingUsecase) SaveToken(ctx context.Context, guildID, channelID, user
 }
 
 func (u *SettingUsecase) GetToken(ctx context.Context, guildID, channelID, userID string) (string, error) {
-	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+	setting, err := u.repo.Find(ctx, guildID, userID)
 	if err != nil {
 		return "", err
 	}
@@ -75,10 +75,6 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 	}
 
 	if setting == nil {
-		setting, err = u.repo.Find(ctx, guildID, channelID, userID)
-		if err != nil {
-			return err
-		}
 	}
 
 	if setting == nil {
@@ -87,8 +83,7 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 			ChannelID: channelID,
 			UserID:    userID,
 		}
-	} else if setting.ChannelID == "" {
-		// 既存設定があるがchannelIDが不明な場合は現在のチャンネルを設定
+	} else if setting.ChannelID == "" || setting.ChannelID != channelID {
 		setting.ChannelID = channelID
 	}
 
@@ -125,7 +120,7 @@ func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, 
 		return fmt.Errorf("invalid commandType: %s (must be 'issues' or 'assign')", commandType)
 	}
 
-	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+	setting, err := u.repo.Find(ctx, guildID, userID)
 	if err != nil {
 		return err
 	}
@@ -135,6 +130,8 @@ func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, 
 			ChannelID: channelID,
 			UserID:    userID,
 		}
+	} else if setting.ChannelID == "" || setting.ChannelID != channelID {
+		setting.ChannelID = channelID
 	}
 
 	if commandType == "issues" {
@@ -154,7 +151,7 @@ func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, c
 		return nil, fmt.Errorf("invalid commandType: %s (must be 'issues' or 'assign')", commandType)
 	}
 
-	setting, err := u.repo.Find(ctx, guildID, channelID, userID)
+	setting, err := u.repo.Find(ctx, guildID, userID)
 	if err != nil {
 		return nil, err
 	}

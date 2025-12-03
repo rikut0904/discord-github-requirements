@@ -23,8 +23,8 @@ func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entit
 	query := `
 		INSERT INTO user_settings (
 			guild_id,
-			channel_id,
 			user_id,
+			channel_id,
 			encrypted_token,
 			excluded_repositories,
 			excluded_issues_repositories,
@@ -32,17 +32,18 @@ func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entit
 			updated_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (guild_id, channel_id, user_id)
+		ON CONFLICT (guild_id, user_id)
 		DO UPDATE SET encrypted_token = COALESCE(EXCLUDED.encrypted_token, user_settings.encrypted_token),
 		              excluded_repositories = COALESCE(EXCLUDED.excluded_repositories, user_settings.excluded_repositories),
 		              excluded_issues_repositories = COALESCE(EXCLUDED.excluded_issues_repositories, user_settings.excluded_issues_repositories),
 		              excluded_assign_repositories = COALESCE(EXCLUDED.excluded_assign_repositories, user_settings.excluded_assign_repositories),
+		              channel_id = EXCLUDED.channel_id,
 		              updated_at = EXCLUDED.updated_at
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		setting.GuildID,
-		setting.ChannelID,
 		setting.UserID,
+		setting.ChannelID,
 		nullStringIfEmpty(setting.EncryptedToken),
 		nullArrayIfNil(setting.ExcludedRepositories),
 		nullArrayIfNil(setting.ExcludedIssuesRepositories),
@@ -68,18 +69,18 @@ func nullArrayIfNil(arr []string) interface{} {
 	return pq.Array(arr)
 }
 
-func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, channelID, userID string) (*entity.UserSetting, error) {
+func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
 	query := `
-		SELECT guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
+		SELECT guild_id, user_id, channel_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
 		FROM user_settings
-		WHERE guild_id = $1 AND channel_id = $2 AND user_id = $3
+		WHERE guild_id = $1 AND user_id = $2
 	`
 	var setting entity.UserSetting
 	var encryptedToken sql.NullString
-	err := r.db.QueryRowContext(ctx, query, guildID, channelID, userID).Scan(
+	err := r.db.QueryRowContext(ctx, query, guildID, userID).Scan(
 		&setting.GuildID,
-		&setting.ChannelID,
 		&setting.UserID,
+		&setting.ChannelID,
 		&encryptedToken,
 		pq.Array(&setting.ExcludedRepositories),
 		pq.Array(&setting.ExcludedIssuesRepositories),
@@ -113,75 +114,18 @@ func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, chann
 }
 
 func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
-	query := `
-		SELECT guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
-		FROM user_settings
-		WHERE guild_id = $1 AND user_id = $2
-		ORDER BY updated_at DESC
-	`
-
-	rows, err := r.db.QueryContext(ctx, query, guildID, userID)
+	setting, err := r.Find(ctx, guildID, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var aggregated *entity.UserSetting
-
-	for rows.Next() {
-		var (
-			currentSetting entity.UserSetting
-			encryptedToken sql.NullString
-		)
-
-		if err := rows.Scan(
-			&currentSetting.GuildID,
-			&currentSetting.ChannelID,
-			&currentSetting.UserID,
-			&encryptedToken,
-			pq.Array(&currentSetting.ExcludedRepositories),
-			pq.Array(&currentSetting.ExcludedIssuesRepositories),
-			pq.Array(&currentSetting.ExcludedAssignRepositories),
-			&currentSetting.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-
-		if encryptedToken.Valid {
-			currentSetting.EncryptedToken = encryptedToken.String
-		}
-		if aggregated == nil {
-			copySetting := currentSetting
-			aggregated = &copySetting
-			continue
-		}
-
-		mergeStringField(&aggregated.EncryptedToken, currentSetting.EncryptedToken)
-		mergeStringSliceField(&aggregated.ExcludedRepositories, currentSetting.ExcludedRepositories)
-		mergeStringSliceField(&aggregated.ExcludedIssuesRepositories, currentSetting.ExcludedIssuesRepositories)
-		mergeStringSliceField(&aggregated.ExcludedAssignRepositories, currentSetting.ExcludedAssignRepositories)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	if aggregated != nil {
-		if aggregated.ExcludedRepositories == nil {
-			aggregated.ExcludedRepositories = []string{}
-		}
-		if aggregated.ExcludedIssuesRepositories == nil {
-			aggregated.ExcludedIssuesRepositories = []string{}
-		}
-		if aggregated.ExcludedAssignRepositories == nil {
-			aggregated.ExcludedAssignRepositories = []string{}
-		}
-		if err := r.populateNotificationChannels(ctx, aggregated); err != nil {
+	if setting != nil {
+		if err := r.populateNotificationChannels(ctx, setting); err != nil {
 			return nil, err
 		}
 	}
 
-	return aggregated, nil
+	return setting, nil
 }
 
 func (r *PostgresUserSettingRepository) ClearNotificationChannels(ctx context.Context, guildID, userID string) error {
@@ -190,21 +134,15 @@ func (r *PostgresUserSettingRepository) ClearNotificationChannels(ctx context.Co
 	return err
 }
 
-func (r *PostgresUserSettingRepository) Delete(ctx context.Context, guildID, channelID, userID string) error {
-	query := `DELETE FROM user_settings WHERE guild_id = $1 AND channel_id = $2 AND user_id = $3`
-	_, err := r.db.ExecContext(ctx, query, guildID, channelID, userID)
+func (r *PostgresUserSettingRepository) Delete(ctx context.Context, guildID, userID string) error {
+	query := `DELETE FROM user_settings WHERE guild_id = $1 AND user_id = $2`
+	_, err := r.db.ExecContext(ctx, query, guildID, userID)
 	return err
 }
 
 func (r *PostgresUserSettingRepository) DeleteByGuild(ctx context.Context, guildID string) error {
 	query := `DELETE FROM user_settings WHERE guild_id = $1`
 	_, err := r.db.ExecContext(ctx, query, guildID)
-	return err
-}
-
-func (r *PostgresUserSettingRepository) DeleteByChannel(ctx context.Context, guildID, channelID string) error {
-	query := `DELETE FROM user_settings WHERE guild_id = $1 AND channel_id = $2`
-	_, err := r.db.ExecContext(ctx, query, guildID, channelID)
 	return err
 }
 
@@ -263,18 +201,6 @@ func (r *PostgresUserSettingRepository) populateNotificationChannels(ctx context
 	}
 
 	return nil
-}
-
-func mergeStringField(dst *string, src string) {
-	if *dst == "" && src != "" {
-		*dst = src
-	}
-}
-
-func mergeStringSliceField(dst *[]string, src []string) {
-	if *dst == nil && src != nil {
-		*dst = src
-	}
 }
 
 func InitDB(databaseURL string) (*sql.DB, error) {
