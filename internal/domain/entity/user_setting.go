@@ -4,15 +4,15 @@ import "time"
 
 type UserSetting struct {
 	GuildID                     string
-	ChannelID                   string // Setting保存時のチャンネル（主キー用）
+	ChannelID                   string   // 最後に設定コマンドが実行されたチャンネル
 	UserID                      string
 	EncryptedToken              string
-	ExcludedRepositories        []string // Deprecated: use ExcludedIssuesRepos and ExcludedAssignRepos
+	ExcludedRepositories        []string // Deprecated: use ExcludedIssuesRepositories and ExcludedAssignRepositories
 	ExcludedIssuesRepositories  []string
 	ExcludedAssignRepositories  []string
-	NotificationChannelID       string // Deprecated: 共通通知チャンネル
-	NotificationIssuesChannelID string // /issues用通知チャンネル
-	NotificationAssignChannelID string // /assign用通知チャンネル
+	NotificationChannelID       string // Deprecated: 共通通知チャンネル（all スコープ用）
+	NotificationIssuesChannelID string // /issues コマンド用通知チャンネル
+	NotificationAssignChannelID string // /assign コマンド用通知チャンネル
 	UpdatedAt                   time.Time
 }
 
