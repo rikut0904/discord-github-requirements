@@ -256,10 +256,9 @@ func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.Int
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
 	guildID := i.GuildID
-	channelID := i.ChannelID
 	userID := i.Member.User.ID
 
-	currentExcludes, err := h.settingUsecase.GetExcludedRepositories(ctx, guildID, channelID, userID, commandType)
+	currentExcludes, err := h.settingUsecase.GetExcludedRepositories(ctx, guildID, userID, commandType)
 	if err != nil {
 		fmt.Printf("Error getting excluded repositories: %v\n", err)
 		currentExcludes = []string{}

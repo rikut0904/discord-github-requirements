@@ -70,7 +70,7 @@ func (u *SettingUsecase) SaveToken(ctx context.Context, guildID, channelID, user
 	return u.repo.Save(ctx, setting)
 }
 
-func (u *SettingUsecase) GetToken(ctx context.Context, guildID, channelID, userID string) (string, error) {
+func (u *SettingUsecase) GetToken(ctx context.Context, guildID, userID string) (string, error) {
 	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
 	if err != nil {
 		return "", err
@@ -147,7 +147,7 @@ func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, 
 	return u.repo.Save(ctx, setting)
 }
 
-func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, channelID, userID string, commandType string) ([]string, error) {
+func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, userID string, commandType string) ([]string, error) {
 	if err := validateIssuesOrAssignType(commandType); err != nil {
 		return nil, err
 	}
