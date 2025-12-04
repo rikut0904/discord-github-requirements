@@ -106,7 +106,8 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 	case "assign":
 		scopes = []string{"assign"}
 	default:
-		scopes = []string{"all", "issues", "assign"}
+		// 共通設定: issues と assign スコープのみを設定（all は deprecated のため除外）
+		scopes = []string{"issues", "assign"}
 	}
 
 	for _, scope := range scopes {
