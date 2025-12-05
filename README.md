@@ -1,107 +1,102 @@
 # Discord GitHub 通知 Bot
 
-## 概要
+[![Go Version](https://img.shields.io/badge/Go-1.20+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-336791?style=flat&logo=postgresql)](https://www.postgresql.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Discord 上で GitHub の Issues を取得・閲覧するための Bot。  
-ユーザー自身の GitHub Personal Access Token (PAT) を登録し、そのユーザーがアクセス可能なすべてのリポジトリを対象に、Slash Command から Issue 情報を参照できます。  
-設定は「ギルド + チャンネル + ユーザー」単位で保存され、Bot がチャンネルから削除されると即時破棄されます。
+Discord から GitHub Issues を横断検索できるスラッシュコマンド Bot です。ユーザーは自分の GitHub Personal Access Token (PAT) を登録し、アクセス可能なリポジトリの Issue を `/issues` や `/assign` コマンドで取得できます。
 
-## 主な機能
+## 特徴
 
-### `/assign`
-- 登録ユーザーの PAT で GitHub API `/issues` を呼び出し、自分に割り当てられている Issue を横断取得。
-- 結果は Embed 形式で表示（タイトル、番号、ラベル、担当者、更新日時、URL など）。
-- ページ指定不要で全件を取得し、Discord の Embed 制限に合わせて複数メッセージに分割表示。
+- 🔐 **ユーザー単位の安全なトークン管理**: モーダル入力 → GitHub API で検証 → AES-256-GCM で暗号化して保存。
+- 📂 **柔軟なリポジトリ指定**: `owner/repo`・`owner` (ユーザー/Organization 全体)・`all` の 3 形式をサポート。
+- 🚫 **コマンド別の除外設定**: `/setting` から `/issues` 用と `/assign` 用に別々の除外パターンを登録可能。
+- 📊 **GitHub Rate Limit を可視化**: 残り回数が少ない場合に警告を表示。
+- 🛠️ **クリーンアーキテクチャ**: ドメイン/ユースケース/インターフェース/インフラを分離し、保守・テストしやすい構成。
 
-### `/issues`
-- GitHub API `/repos/{owner}/{repo}/issues` を利用し、指定したリポジトリの Issue を取得。
-- `repository` オプションで `owner/repo` を指定する（必須）。
-- ページ指定不要で全件を取得し、必要に応じて複数メッセージに分割表示。
+## スラッシュコマンド概要
 
-### `/setting`
-- GitHub Personal Access Token をモーダルで登録/更新。
-- トークン検証後、暗号化して保存。
+| コマンド | 説明 |
+|----------|------|
+| `/setting` | PAT 登録、`/issues` 用除外リスト、`/assign` 用除外リストをモーダルで編集 |
+| `/issues repository:<owner/repo|owner|all>` | 対象リポジトリのオープン Issue を取得。`owner` のみを指定するとそのユーザー/Organization の全リポジトリ、`all` はアクセス可能な全リポジトリを対象にします |
+| `/assign` | 自分に割り当てられたオープン Issue を取得 |
 
-### 初期セットアップ
-Bot をチャンネルに追加すると専用スレッドを自動生成し、以下を案内：
+詳細なパラメータやレスポンス形式は [`docs/API.md`](docs/API.md) を参照してください。
 
-1. GitHub API トークン入力モーダル  
-2. 通知チャンネル選択ドロップダウン  
+## クイックスタート
 
-完了後は、同スレッドにセットアップ完了メッセージを投稿。  
-以降のトークン更新は `/setting` から実行可能。
+### 前提条件
 
-## 設定・保存方式
+- Go 1.20 以上
+- PostgreSQL 14 以上
+- Discord Bot Token
+- GitHub Personal Access Token (repo 権限必須)
 
-- 保存キー: `guild_id + channel_id + user_id`
-- 保存内容: 暗号化済みトークン、通知チャンネル ID、更新日時
-- Bot 削除（ギルド/チャンネル Remove）イベント発火時に該当キーを即時消去
-- ログにはトークンを一切出力しない（管理者も閲覧不可）
+### セットアップ
 
-## セキュリティ
-
-- トークンは AES 等で暗号化し安全に保管、復号は Bot プロセス内部のみで実行。
-- 他ユーザーが設定にアクセスしないよう、`guild/channel/user` の 3 つで ACL を厳格管理。
-- GitHub 401 / 403 / 404 / 422 などのエラー時は、原因に応じたガイドを返信。
-- Rate Limit 残量が閾値以下の場合、次に実行可能となる時刻を案内。
-
-## エラーハンドリング
-
-- **トークン未登録**: `/setting` の実行を案内
-- **認証失敗 (401)**: トークン期限切れ・権限不足を表示
-- **権限不足 (403/404)**: リポジトリアクセス権限に関する案内
-- **入力エラー (422)**: 入力内容の再確認を促す
-- **Rate Limit**: `X-RateLimit-Remaining` を監視し、残量が少ない場合に待機時間を提示
-
-## 技術スタック
-
-- 言語: Go
-- アーキテクチャ: クリーンアーキテクチャ
-- データベース: PostgreSQL
-- Discord SDK: discordgo
-
-## プロジェクト構造
-
-```
-├── cmd/bot/           # エントリーポイント
-├── internal/
-│   ├── domain/        # ドメイン層
-│   │   ├── entity/    # エンティティ
-│   │   └── repository/# リポジトリインターフェース
-│   ├── usecase/       # ユースケース層
-│   ├── infrastructure/# インフラ層
-│   │   ├── crypto/    # 暗号化
-│   │   ├── database/  # DB実装
-│   │   ├── discord/   # Discord
-│   │   └── github/    # GitHub API
-│   └── interface/     # インターフェース層
-│       └── handler/   # Discordハンドラー
-└── migrations/        # DBマイグレーション
-```
-
-## 環境変数
-
-| 変数名 | 説明 |
-|--------|------|
-| `DISCORD_TOKEN` | Discord Bot Token |
-| `DATABASE_URL` | PostgreSQL接続URL |
-| `ENCRYPTION_KEY` | AES暗号化キー（32バイト） |
-
-## セットアップ
-
-1. マイグレーション実行
 ```bash
+# 1. リポジトリを取得
+git clone https://github.com/your-org/github-discord-bot.git
+cd github-discord-bot
+
+# 2. 依存関係を取得
+go mod download
+
+# 3. データベースを用意（例: Docker Compose）
+docker-compose up -d
+
+# 4. マイグレーションを順番に適用
+export DATABASE_URL="postgresql://bot:bot_password@localhost:5432/github_bot"
 psql $DATABASE_URL -f migrations/001_create_user_settings.sql
+psql $DATABASE_URL -f migrations/002_add_excluded_repositories.sql
+psql $DATABASE_URL -f migrations/003_add_command_specific_excluded_repositories.sql
+
+# 5. 環境変数を設定
+cp .env.example .env
+# DISCORD_TOKEN / DATABASE_URL / ENCRYPTION_KEY (32byte) を記入
+
+# 6. 実行
+go run ./cmd/bot
 ```
 
-2. ビルド・実行
+### よく使う開発コマンド
+
 ```bash
+# テスト
+go test ./...
+
+# ビルド
 go build -o bot ./cmd/bot
+
+# 生成したバイナリを実行
 ./bot
 ```
 
-## 今後の TODO
+## アーキテクチャ
 
-1. `/assign` コマンド実装（詳細は ISSUE_ASSIGN.md を参照）
-2. 初期セットアップ用スレッド生成と通知チャンネル設定 UI
-3. Bot削除時のデータ即時消去
+```
+cmd/bot              # エントリーポイント
+internal/
+  ├── domain        # エンティティ・リポジトリインターフェース
+  ├── usecase       # 設定・Issue 関連ユースケース
+  ├── interface     # Discord ハンドラ
+  └── infrastructure
+       ├── database # PostgreSQL 実装
+       ├── crypto   # AES-256-GCM 実装
+       └── github   # GitHub API クライアント
+migrations/          # SQL マイグレーション
+```
+
+各層の責務や処理フローは [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) にまとめています。
+
+## ドキュメント
+
+- [`docs/SETUP.md`](docs/SETUP.md) - 詳細なセットアップ手順
+- [`docs/API.md`](docs/API.md) - スラッシュコマンド仕様
+- [`docs/DATABASE.md`](docs/DATABASE.md) - スキーマとマイグレーション
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) - 開発プロセス
+
+## ライセンス
+
+本プロジェクトは [MIT License](LICENSE) の下で公開されています。
