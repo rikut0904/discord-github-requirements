@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github-discord-bot/internal/domain/entity"
 	"github-discord-bot/internal/infrastructure/github"
 	"github-discord-bot/internal/usecase"
 
@@ -36,18 +37,23 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 					Description: "設定の種類",
 					Required:    true,
 					Choices: []*discordgo.ApplicationCommandOptionChoice{
-						{
-							Name:  "トークン設定",
-							Value: "token",
-						},
-						{
-							Name:  "/issues用 除外リポジトリ設定",
-							Value: "exclude_issues",
-						},
-						{
-							Name:  "/assign用 除外リポジトリ設定",
-							Value: "exclude_assign",
-						},
+						{Name: "トークン設定", Value: "token"},
+						{Name: "通知チャンネル設定", Value: "notification_channel"},
+						{Name: "/issues用 除外リポジトリ設定", Value: "exclude_issues"},
+						{Name: "/assign用 除外リポジトリ設定", Value: "exclude_assign"},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "notification_scope",
+					Description: "通知チャンネル設定の対象/操作 (all・issues・assign・confirm・clear)",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "all (共通)", Value: "all"},
+						{Name: "issues のみ", Value: "issues"},
+						{Name: "assign のみ", Value: "assign"},
+						{Name: "確認", Value: "confirm"},
+						{Name: "解除", Value: "clear"},
 					},
 				},
 			},
@@ -103,21 +109,119 @@ func (h *DiscordHandler) handleCommand(s *discordgo.Session, i *discordgo.Intera
 func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	action := "token"
+	notificationScope := "all"
 
 	for _, opt := range options {
-		if opt.Name == "action" {
+		switch opt.Name {
+		case "action":
 			action = opt.StringValue()
+		case "notification_scope":
+			notificationScope = opt.StringValue()
 		}
 	}
 
 	switch action {
 	case "token":
 		h.showTokenModal(s, i)
+	case "notification_channel":
+		switch notificationScope {
+		case "confirm":
+			h.handleNotificationChannelConfirm(s, i)
+			return
+		case "clear":
+			h.handleNotificationChannelClear(s, i)
+			return
+		case CommandTypeIssues:
+			h.handleNotificationChannelSetting(s, i, CommandTypeIssues)
+		case CommandTypeAssign:
+			h.handleNotificationChannelSetting(s, i, CommandTypeAssign)
+		default:
+			h.handleNotificationChannelSetting(s, i, "all")
+		}
 	case "exclude_issues":
 		h.showExcludeModal(s, i, CommandTypeIssues)
 	case "exclude_assign":
 		h.showExcludeModal(s, i, CommandTypeAssign)
+	default:
+		h.respondWithError(s, i, "❌ 未対応のアクションです。")
 	}
+}
+
+func (h *DiscordHandler) handleNotificationChannelSetting(s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
+
+	guildID := i.GuildID
+	channelID := i.ChannelID
+	userID := i.Member.User.ID
+
+	// 現在のチャンネルを通知チャンネルとして保存
+	err := h.settingUsecase.SaveNotificationChannel(ctx, guildID, channelID, userID, commandType, channelID)
+	if err != nil {
+		h.respondWithError(s, i, "❌ 通知チャンネルの設定に失敗しました")
+		return
+	}
+
+	var message string
+	switch commandType {
+	case CommandTypeIssues:
+		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を /issues 用通知チャンネルに設定しました。", channelID)
+	case CommandTypeAssign:
+		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を /assign 用通知チャンネルに設定しました。", channelID)
+	default:
+		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を通知チャンネルとして設定しました（/issues・/assign共通）。", channelID)
+	}
+
+	h.respondWithSuccess(s, i, message)
+}
+
+func (h *DiscordHandler) handleNotificationChannelConfirm(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
+
+	guildID := i.GuildID
+	userID := i.Member.User.ID
+
+	setting, err := h.settingUsecase.GetUserSetting(ctx, guildID, userID)
+	if err != nil {
+		h.respondWithError(s, i, "❌ 通知チャンネル情報の取得に失敗しました")
+		return
+	}
+
+	var (
+		commonChannel string
+		issuesChannel string
+		assignChannel string
+	)
+
+	if setting != nil {
+		commonChannel = setting.NotificationChannelID
+		issuesChannel = setting.NotificationChannelForIssues()
+		assignChannel = setting.NotificationChannelForAssign()
+	}
+
+	message := fmt.Sprintf("📋 通知チャンネル設定状況:\n- /issues: %s\n- /assign: %s\n- 共通(旧設定): %s",
+		formatChannelMention(issuesChannel),
+		formatChannelMention(assignChannel),
+		formatChannelMention(commonChannel),
+	)
+
+	h.respondWithSuccess(s, i, message)
+}
+
+func (h *DiscordHandler) handleNotificationChannelClear(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
+
+	guildID := i.GuildID
+	userID := i.Member.User.ID
+
+	if err := h.settingUsecase.ClearNotificationChannels(ctx, guildID, userID); err != nil {
+		h.respondWithError(s, i, "❌ 通知チャンネル設定の解除に失敗しました")
+		return
+	}
+
+	h.respondWithSuccess(s, i, "🧹 通知チャンネル設定をすべて解除しました。")
 }
 
 func (h *DiscordHandler) showTokenModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -152,10 +256,9 @@ func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.Int
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
 	guildID := i.GuildID
-	channelID := i.ChannelID
 	userID := i.Member.User.ID
 
-	currentExcludes, err := h.settingUsecase.GetExcludedRepositories(ctx, guildID, channelID, userID, commandType)
+	currentExcludes, err := h.settingUsecase.GetExcludedRepositories(ctx, guildID, userID, commandType)
 	if err != nil {
 		fmt.Printf("Error getting excluded repositories: %v\n", err)
 		currentExcludes = []string{}
@@ -368,6 +471,27 @@ func (h *DiscordHandler) respondDeferred(s *discordgo.Session, i *discordgo.Inte
 	})
 }
 
+// sendEmbedsToChannel は指定されたチャンネルにembedsを送信します
+func (h *DiscordHandler) sendEmbedsToChannel(s *discordgo.Session, channelID string, content string, embeds []*discordgo.MessageEmbed) {
+	// Discordの制限: 1メッセージあたり最大10 embeds
+	for i := 0; i < len(embeds); i += MaxEmbedsPerMessage {
+		end := i + MaxEmbedsPerMessage
+		if end > len(embeds) {
+			end = len(embeds)
+		}
+
+		messageContent := ""
+		if i == 0 && content != "" {
+			messageContent = content
+		}
+
+		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+			Content: messageContent,
+			Embeds:  embeds[i:end],
+		})
+	}
+}
+
 // repositoryInputType はリポジトリ入力の種類を表します
 type repositoryInputType int
 
@@ -416,10 +540,10 @@ func parseRepositoryInput(repoInput string) repositoryInput {
 }
 
 // fetchIssuesByRepository はリポジトリ入力に基づいてissuesを取得します
-func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, channelID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, []usecase.RepositoryError, error) {
+func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, userID string, input repositoryInput) ([]github.Issue, *github.RateLimitInfo, []usecase.RepositoryError, error) {
 	switch input.inputType {
 	case repoInputTypeAll:
-		result, err := h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, channelID, userID)
+		result, err := h.issuesUsecase.GetAllRepositoriesIssues(ctx, guildID, userID)
 		if err != nil {
 			if result != nil {
 				return nil, result.RateLimit, nil, err
@@ -428,7 +552,7 @@ func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, c
 		}
 		return result.Issues, result.RateLimit, result.FailedRepos, nil
 	case repoInputTypeUser:
-		result, err := h.issuesUsecase.GetUserIssues(ctx, guildID, channelID, userID, input.username)
+		result, err := h.issuesUsecase.GetUserIssues(ctx, guildID, userID, input.username)
 		if err != nil {
 			if result != nil {
 				return nil, result.RateLimit, nil, err
@@ -437,7 +561,7 @@ func (h *DiscordHandler) fetchIssuesByRepository(ctx context.Context, guildID, c
 		}
 		return result.Issues, result.RateLimit, result.FailedRepos, nil
 	case repoInputTypeSpecific:
-		issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, channelID, userID, input.owner, input.repo)
+		issues, rateLimit, err := h.issuesUsecase.GetRepositoryIssues(ctx, guildID, userID, input.owner, input.repo)
 		return issues, rateLimit, nil, err
 	default:
 		return nil, nil, nil, fmt.Errorf("unexpected repository input type: %d", input.inputType)
@@ -468,15 +592,19 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
-	guildID := i.GuildID
-	channelID := i.ChannelID
-	userID := i.Member.User.ID
+	currentChannelID := i.ChannelID
 
 	// Defer response for long operations
 	h.respondDeferred(s, i)
 
+	// Get notification channel for issues command
+	notificationChannelID, _, err := h.getNotificationChannelForCommand(ctx, s, i, "issues")
+	if err != nil {
+		return
+	}
+
 	// Fetch issues based on repository input
-	issues, rateLimit, failedRepos, err := h.fetchIssuesByRepository(ctx, guildID, channelID, userID, input)
+	issues, rateLimit, failedRepos, err := h.fetchIssuesByRepository(ctx, i.GuildID, i.Member.User.ID, input)
 
 	if err != nil {
 		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
@@ -518,21 +646,33 @@ func (h *DiscordHandler) handleIssuesCommand(s *discordgo.Session, i *discordgo.
 		}
 	}
 
-	h.respondWithEmbeds(s, i, content, embeds)
+	// Send completion message to the channel where command was executed
+	completionMsg := "✅ Issue一覧を取得しました。"
+	if currentChannelID != notificationChannelID {
+		completionMsg = fmt.Sprintf("✅ Issue一覧を取得しました。結果は <#%s> に送信されました。", notificationChannelID)
+	}
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &completionMsg,
+	})
+
+	// Send issues to notification channel
+	h.sendEmbedsToChannel(s, notificationChannelID, content, embeds)
 }
 
 func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
-	guildID := i.GuildID
-	channelID := i.ChannelID
-	userID := i.Member.User.ID
+	currentChannelID := i.ChannelID
 
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
+	h.respondDeferred(s, i)
 
-	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, guildID, channelID, userID)
+	// Get notification channel for assign command
+	notificationChannelID, _, err := h.getNotificationChannelForCommand(ctx, s, i, "assign")
+	if err != nil {
+		return
+	}
+
+	issues, rateLimit, err := h.issuesUsecase.GetAssignedIssues(ctx, i.GuildID, i.Member.User.ID)
 	if err != nil {
 		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
 		return
@@ -556,41 +696,52 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 			rateLimit.ResetAt.Format("15:04:05"))
 	}
 
-	h.respondWithEmbeds(s, i, content, embeds)
-}
-
-func (h *DiscordHandler) respondWithEmbeds(s *discordgo.Session, i *discordgo.InteractionCreate, content string, embeds []*discordgo.MessageEmbed) {
-
-	if len(embeds) == 0 {
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: &content,
-		})
-		return
+	// Send completion message to the channel where command was executed
+	completionMsg := "✅ 割り当てられたIssue一覧を取得しました。"
+	if currentChannelID != notificationChannelID {
+		completionMsg = fmt.Sprintf("✅ 割り当てられたIssue一覧を取得しました。結果は <#%s> に送信されました。", notificationChannelID)
 	}
-
-	firstEmbeds := embeds
-	if len(firstEmbeds) > MaxEmbedsPerMessage {
-		firstEmbeds = embeds[:MaxEmbedsPerMessage]
-	}
-
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: &content,
-		Embeds:  &firstEmbeds,
+		Content: &completionMsg,
 	})
 
-	for offset := MaxEmbedsPerMessage; offset < len(embeds); offset += MaxEmbedsPerMessage {
-		end := offset + MaxEmbedsPerMessage
-		if end > len(embeds) {
-			end = len(embeds)
-		}
-		chunk := embeds[offset:end]
-		if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-			Embeds: chunk,
-		}); err != nil {
-			fmt.Printf("Failed to send followup message: %v\n", err)
-			break
-		}
+	// Send issues to notification channel
+	h.sendEmbedsToChannel(s, notificationChannelID, content, embeds)
+}
+
+// getNotificationChannelForCommand はユーザー設定を取得し、指定されたコマンドタイプの通知チャンネルIDを返します。
+// 設定が存在しない、または通知チャンネルが設定されていない場合はエラーを返します。
+func (h *DiscordHandler) getNotificationChannelForCommand(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) (string, *entity.UserSetting, error) {
+	guildID := i.GuildID
+	userID := i.Member.User.ID
+
+	setting, err := h.settingUsecase.GetUserSetting(ctx, guildID, userID)
+	if err != nil || setting == nil {
+		h.respondEditWithError(s, i, MsgTokenNotFound)
+		return "", nil, fmt.Errorf("user setting not found")
 	}
+
+	var notificationChannelID string
+	var errorMsg string
+
+	switch commandType {
+	case "issues":
+		notificationChannelID = setting.NotificationChannelForIssues()
+		errorMsg = "❌ /issues用通知チャンネルが設定されていません。`/setting action:notification_channel notification_scope:issues` で設定してください。"
+	case "assign":
+		notificationChannelID = setting.NotificationChannelForAssign()
+		errorMsg = "❌ /assign用通知チャンネルが設定されていません。`/setting action:notification_channel notification_scope:assign` で設定してください。"
+	default:
+		h.respondEditWithError(s, i, "❌ 不明なコマンドタイプです")
+		return "", nil, fmt.Errorf("unknown command type: %s", commandType)
+	}
+
+	if notificationChannelID == "" {
+		h.respondEditWithError(s, i, errorMsg)
+		return "", nil, fmt.Errorf("notification channel not configured for %s", commandType)
+	}
+
+	return notificationChannelID, setting, nil
 }
 
 func isValidExcludePattern(pattern string) bool {
@@ -622,6 +773,13 @@ func isValidExcludePattern(pattern string) bool {
 	}
 
 	return false
+}
+
+func formatChannelMention(channelID string) string {
+	if channelID == "" {
+		return "未設定"
+	}
+	return fmt.Sprintf("<#%s>", channelID)
 }
 
 func createIssueEmbed(issue github.Issue) *discordgo.MessageEmbed {
@@ -678,7 +836,7 @@ func createIssueEmbed(issue github.Issue) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Title:  fmt.Sprintf("#%d %s", issue.Number, issue.Title),
 		URL:    issue.HTMLURL,
-		Color:  0x238636,
+		Color:  ColorGitHubSuccess,
 		Fields: fields,
 	}
 }

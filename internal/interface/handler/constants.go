@@ -57,3 +57,8 @@ const (
 const (
 	DefaultContextTimeout = 30 * time.Second // GitHub API calls timeout
 )
+
+// Discord Embed Colors
+const (
+	ColorGitHubSuccess = 0x238636 // GitHub's green color for success/open issues
+)

@@ -21,19 +21,29 @@ func NewPostgresUserSettingRepository(db *sql.DB) repository.UserSettingReposito
 
 func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entity.UserSetting) error {
 	query := `
-		INSERT INTO user_settings (guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at)
+		INSERT INTO user_settings (
+			guild_id,
+			user_id,
+			channel_id,
+			encrypted_token,
+			excluded_repositories,
+			excluded_issues_repositories,
+			excluded_assign_repositories,
+			updated_at
+		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (guild_id, channel_id, user_id)
+		ON CONFLICT (guild_id, user_id)
 		DO UPDATE SET encrypted_token = COALESCE(EXCLUDED.encrypted_token, user_settings.encrypted_token),
 		              excluded_repositories = COALESCE(EXCLUDED.excluded_repositories, user_settings.excluded_repositories),
 		              excluded_issues_repositories = COALESCE(EXCLUDED.excluded_issues_repositories, user_settings.excluded_issues_repositories),
 		              excluded_assign_repositories = COALESCE(EXCLUDED.excluded_assign_repositories, user_settings.excluded_assign_repositories),
+		              channel_id = EXCLUDED.channel_id,
 		              updated_at = EXCLUDED.updated_at
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		setting.GuildID,
-		setting.ChannelID,
 		setting.UserID,
+		setting.ChannelID,
 		nullStringIfEmpty(setting.EncryptedToken),
 		nullArrayIfNil(setting.ExcludedRepositories),
 		nullArrayIfNil(setting.ExcludedIssuesRepositories),
@@ -59,18 +69,26 @@ func nullArrayIfNil(arr []string) interface{} {
 	return pq.Array(arr)
 }
 
-func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, channelID, userID string) (*entity.UserSetting, error) {
+// ensureEmptyArrayNotNil は配列がnilの場合に空配列を返します
+func ensureEmptyArrayNotNil(arr []string) []string {
+	if arr == nil {
+		return []string{}
+	}
+	return arr
+}
+
+func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
 	query := `
-		SELECT guild_id, channel_id, user_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
+		SELECT guild_id, user_id, channel_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
 		FROM user_settings
-		WHERE guild_id = $1 AND channel_id = $2 AND user_id = $3
+		WHERE guild_id = $1 AND user_id = $2
 	`
 	var setting entity.UserSetting
 	var encryptedToken sql.NullString
-	err := r.db.QueryRowContext(ctx, query, guildID, channelID, userID).Scan(
+	err := r.db.QueryRowContext(ctx, query, guildID, userID).Scan(
 		&setting.GuildID,
-		&setting.ChannelID,
 		&setting.UserID,
+		&setting.ChannelID,
 		&encryptedToken,
 		pq.Array(&setting.ExcludedRepositories),
 		pq.Array(&setting.ExcludedIssuesRepositories),
@@ -86,21 +104,26 @@ func (r *PostgresUserSettingRepository) Find(ctx context.Context, guildID, chann
 	if encryptedToken.Valid {
 		setting.EncryptedToken = encryptedToken.String
 	}
-	if setting.ExcludedRepositories == nil {
-		setting.ExcludedRepositories = []string{}
+	setting.ExcludedRepositories = ensureEmptyArrayNotNil(setting.ExcludedRepositories)
+	setting.ExcludedIssuesRepositories = ensureEmptyArrayNotNil(setting.ExcludedIssuesRepositories)
+	setting.ExcludedAssignRepositories = ensureEmptyArrayNotNil(setting.ExcludedAssignRepositories)
+
+	if err := r.populateNotificationChannels(ctx, &setting); err != nil {
+		return nil, err
 	}
-	if setting.ExcludedIssuesRepositories == nil {
-		setting.ExcludedIssuesRepositories = []string{}
-	}
-	if setting.ExcludedAssignRepositories == nil {
-		setting.ExcludedAssignRepositories = []string{}
-	}
+
 	return &setting, nil
 }
 
-func (r *PostgresUserSettingRepository) Delete(ctx context.Context, guildID, channelID, userID string) error {
-	query := `DELETE FROM user_settings WHERE guild_id = $1 AND channel_id = $2 AND user_id = $3`
-	_, err := r.db.ExecContext(ctx, query, guildID, channelID, userID)
+func (r *PostgresUserSettingRepository) ClearNotificationChannels(ctx context.Context, guildID, userID string) error {
+	query := `DELETE FROM user_notification_channels WHERE guild_id = $1 AND user_id = $2`
+	_, err := r.db.ExecContext(ctx, query, guildID, userID)
+	return err
+}
+
+func (r *PostgresUserSettingRepository) Delete(ctx context.Context, guildID, userID string) error {
+	query := `DELETE FROM user_settings WHERE guild_id = $1 AND user_id = $2`
+	_, err := r.db.ExecContext(ctx, query, guildID, userID)
 	return err
 }
 
@@ -110,10 +133,61 @@ func (r *PostgresUserSettingRepository) DeleteByGuild(ctx context.Context, guild
 	return err
 }
 
-func (r *PostgresUserSettingRepository) DeleteByChannel(ctx context.Context, guildID, channelID string) error {
-	query := `DELETE FROM user_settings WHERE guild_id = $1 AND channel_id = $2`
-	_, err := r.db.ExecContext(ctx, query, guildID, channelID)
+func (r *PostgresUserSettingRepository) SaveNotificationChannelSetting(ctx context.Context, guildID, userID, scope, channelID string) error {
+	query := `
+		INSERT INTO user_notification_channels (guild_id, user_id, scope, channel_id, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (guild_id, user_id, scope)
+		DO UPDATE SET channel_id = EXCLUDED.channel_id,
+		             updated_at = EXCLUDED.updated_at
+	`
+	_, err := r.db.ExecContext(ctx, query, guildID, userID, scope, channelID)
 	return err
+}
+
+func (r *PostgresUserSettingRepository) GetNotificationChannels(ctx context.Context, guildID, userID string) (map[string]string, error) {
+	query := `
+		SELECT scope, channel_id
+		FROM user_notification_channels
+		WHERE guild_id = $1 AND user_id = $2
+	`
+	rows, err := r.db.QueryContext(ctx, query, guildID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	channels := make(map[string]string)
+	for rows.Next() {
+		var scope, channelID string
+		if err := rows.Scan(&scope, &channelID); err != nil {
+			return nil, err
+		}
+		channels[scope] = channelID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return channels, nil
+}
+
+func (r *PostgresUserSettingRepository) populateNotificationChannels(ctx context.Context, setting *entity.UserSetting) error {
+	channels, err := r.GetNotificationChannels(ctx, setting.GuildID, setting.UserID)
+	if err != nil {
+		return err
+	}
+
+	if ch, ok := channels["all"]; ok {
+		setting.NotificationChannelID = ch
+	}
+	if ch, ok := channels["issues"]; ok {
+		setting.NotificationIssuesChannelID = ch
+	}
+	if ch, ok := channels["assign"]; ok {
+		setting.NotificationAssignChannelID = ch
+	}
+
+	return nil
 }
 
 func InitDB(databaseURL string) (*sql.DB, error) {
