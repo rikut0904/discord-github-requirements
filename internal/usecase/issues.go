@@ -49,9 +49,15 @@ func (u *IssuesUsecase) getSettingAndToken(ctx context.Context, guildID, userID 
 		return nil, "", ErrTokenNotFound
 	}
 
+	// トークンが設定されていない場合
+	if setting.EncryptedToken == "" {
+		return nil, "", ErrTokenNotFound
+	}
+
 	token, err := u.crypto.Decrypt(setting.EncryptedToken)
 	if err != nil {
-		return nil, "", err
+		// 復号化エラーもトークン関連のエラーとして扱う
+		return nil, "", ErrTokenNotFound
 	}
 
 	return setting, token, nil
