@@ -68,7 +68,7 @@ internal/
     database/postgres.go        repository.UserSettingRepository 実装
     crypto/aes.go               AES-256-GCM 暗号化
     github/client.go            GitHub REST API クライアント
-migrations/                 `001`〜`003` の SQL
+migrations/                 `001`〜`002` の SQL
 ```
 
 ---
@@ -88,6 +88,9 @@ type UserSetting struct {
     ExcludedRepositories       []string // 旧設定 (互換用)
     ExcludedIssuesRepositories []string
     ExcludedAssignRepositories []string
+    NotificationChannelID      string
+    NotificationIssuesChannelID string
+    NotificationAssignChannelID string
     UpdatedAt                  time.Time
 }
 ```
@@ -97,10 +100,12 @@ Repository インターフェースはインフラ層実装を抽象化します
 ```go
 type UserSettingRepository interface {
     Save(ctx context.Context, setting *entity.UserSetting) error
-    Find(ctx context.Context, guildID, channelID, userID string) (*entity.UserSetting, error)
-    Delete(ctx context.Context, guildID, channelID, userID string) error
+    FindByGuildAndUser(ctx context.Context, guildID, userID string) (*entity.UserSetting, error)
+    SaveNotificationChannelSetting(ctx context.Context, guildID, userID, scope, channelID string) error
+    GetNotificationChannels(ctx context.Context, guildID, userID string) (map[string]string, error)
+    ClearNotificationChannels(ctx context.Context, guildID, userID string) error
+    Delete(ctx context.Context, guildID, userID string) error
     DeleteByGuild(ctx context.Context, guildID string) error
-    DeleteByChannel(ctx context.Context, guildID, channelID string) error
 }
 ```
 
@@ -110,6 +115,7 @@ type UserSettingRepository interface {
 - PAT を GitHub API で検証 (`client.ValidateToken`)
 - AES-256 で暗号化して保存
 - `/issues`・`/assign` 用の除外リストを更新/取得
+- 通知チャンネル設定を scope ごとに登録/確認/クリア
 
 #### IssuesUsecase
 - PAT 復号 → GitHub API 呼び出し (`GetAllRepositoryIssues`, `GetAllAssignedIssues` など)
@@ -127,7 +133,7 @@ type UserSettingRepository interface {
 
 ### Infrastructure Layer
 
-- **database/postgres**: `user_settings` テーブルへの CRUD。`COALESCE` を使いモーダルから送信されなかったフィールドを維持します。
+- **database/postgres**: `user_settings` / `user_notification_channels` テーブルへの CRUD。`COALESCE` を使いモーダルから送信されなかったフィールドを維持します。
 - **crypto/aes**: 32 バイト鍵で AES-256-GCM を実装。暗号化結果は Base64 文字列。
 - **github/client**: 認証ヘッダーを付与した `net/http` クライアント。ページングを `collectAllPages` で抽象化し、Rate Limit をレスポンスヘッダーから解析します。
 
@@ -189,7 +195,7 @@ GitHub.Client.GetAllAssignedIssues
 ## セキュリティ設計
 
 - **PAT 暗号化**: 32 バイト鍵に固定し、GCM で暗号化 + Base64。鍵長が異なる場合は起動時にエラー。
-- **アクセス制御**: 設定はギルド + チャンネル + ユーザーで分離。別チャンネルからは参照できません。
+- **アクセス制御**: 設定はギルド + ユーザーで分離し、通知チャンネルも scope ごとに個別保存。
 - **入力バリデーション**: リポジトリ入力は `/`, `all` などを解析し、その他はエラー。除外パターンも `owner[/repo|/*]` のみ許可し、空白や改行を拒否。
 - **エラーメッセージのサニタイズ**: GitHub API のメッセージのみユーザーに転送し、内部エラーは汎用メッセージで隠蔽。
 - **ログ**: PAT や入力値はログに出力しません (エラーは `log.Printf` で内容のみ)。

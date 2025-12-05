@@ -49,8 +49,7 @@ docker-compose up -d
 # 4. マイグレーションを順番に適用
 export DATABASE_URL="postgresql://bot:bot_password@localhost:5432/github_bot"
 psql $DATABASE_URL -f migrations/001_create_user_settings.sql
-psql $DATABASE_URL -f migrations/002_add_excluded_repositories.sql
-psql $DATABASE_URL -f migrations/003_add_command_specific_excluded_repositories.sql
+psql $DATABASE_URL -f migrations/002_create_user_notification_channels.sql
 
 # 5. 環境変数を設定
 cp .env.example .env

@@ -18,8 +18,8 @@ Bot はユーザー単位の設定のみを PostgreSQL に保存します。本�
 |------|------|
 | RDBMS | PostgreSQL 14+ |
 | 接続方法 | `database/sql` + `lib/pq` |
-| 保存対象 | PAT (暗号化) とコマンド別除外リスト |
-| テーブル数 | 1 (`user_settings`) |
+| 保存対象 | PAT (暗号化)、コマンド別除外リスト、通知チャンネル設定 |
+| テーブル数 | 2 (`user_settings`, `user_notification_channels`) |
 
 ---
 
@@ -27,29 +27,28 @@ Bot はユーザー単位の設定のみを PostgreSQL に保存します。本�
 
 ### `user_settings`
 
-ユーザーが登録した PAT とコマンド別除外設定を保持します。主キーは「ギルド + チャンネル + ユーザー」です。同じユーザーでもチャンネルごとに設定を切り替えられます。
+ユーザーが登録した PAT とコマンド別除外設定を保持します。主キーは「ギルド + ユーザー」です。`channel_id` は最後に `/setting` を実行したチャンネルを記録するためのメタデータです。
 
 ```sql
 CREATE TABLE user_settings (
     guild_id VARCHAR(32) NOT NULL,
-    channel_id VARCHAR(32) NOT NULL,
     user_id VARCHAR(32) NOT NULL,
+    channel_id VARCHAR(32) NOT NULL,
     encrypted_token TEXT,
     excluded_repositories TEXT[] DEFAULT '{}'::TEXT[], -- 互換用 (非推奨)
     excluded_issues_repositories TEXT[] DEFAULT '{}'::TEXT[],
     excluded_assign_repositories TEXT[] DEFAULT '{}'::TEXT[],
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (guild_id, channel_id, user_id)
+    PRIMARY KEY (guild_id, user_id)
 );
 
 CREATE INDEX idx_user_settings_guild ON user_settings(guild_id);
-CREATE INDEX idx_user_settings_channel ON user_settings(guild_id, channel_id);
 ```
 
 | カラム | 型 | 説明 |
 |--------|----|------|
 | `guild_id` | VARCHAR(32) | Discord サーバー ID (Snowflake) |
-| `channel_id` | VARCHAR(32) | 設定を行ったチャンネル ID |
+| `channel_id` | VARCHAR(32) | 最後に設定を行ったチャンネル ID (メタデータ) |
 | `user_id` | VARCHAR(32) | Discord ユーザー ID |
 | `encrypted_token` | TEXT (nullable) | AES-256-GCM + Base64 で暗号化した PAT |
 | `excluded_repositories` | TEXT[] | 旧 `/setting action:exclude` 用。互換性のため残置 |
@@ -64,30 +63,51 @@ CREATE INDEX idx_user_settings_channel ON user_settings(guild_id, channel_id);
 
 ---
 
+### `user_notification_channels`
+
+通知メッセージを送信するチャンネルをコマンド種別ごとに保持します。`scope` は `issues` / `assign` / `all`（旧設定）を表します。
+
+```sql
+CREATE TABLE user_notification_channels (
+    guild_id VARCHAR(32) NOT NULL,
+    user_id VARCHAR(32) NOT NULL,
+    scope VARCHAR(16) NOT NULL,
+    channel_id VARCHAR(32) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, user_id, scope),
+    CHECK (scope IN ('all', 'issues', 'assign'))
+);
+```
+
+| カラム | 型 | 説明 |
+|--------|----|------|
+| `guild_id` | VARCHAR(32) | Discord サーバー ID |
+| `user_id` | VARCHAR(32) | Discord ユーザー ID |
+| `scope` | VARCHAR(16) | `issues` / `assign` / `all` |
+| `channel_id` | VARCHAR(32) | 通知を送るチャンネル ID |
+| `updated_at` | TIMESTAMP | 最終更新時刻 |
+
 ## マイグレーション
 
 ```
 migrations/
 ├── 001_create_user_settings.sql
-├── 002_add_excluded_repositories.sql
-└── 003_add_command_specific_excluded_repositories.sql
+└── 002_create_user_notification_channels.sql
 ```
 
 実行例:
 
 ```bash
 psql $DATABASE_URL -f migrations/001_create_user_settings.sql
-psql $DATABASE_URL -f migrations/002_add_excluded_repositories.sql
-psql $DATABASE_URL -f migrations/003_add_command_specific_excluded_repositories.sql
+psql $DATABASE_URL -f migrations/002_create_user_notification_channels.sql
 ```
 
 ### 変更履歴
 
 | ファイル | 内容 |
 |----------|------|
-| 001 | 基本カラム + PK を作成 (当初は `encrypted_token` NOT NULL) |
-| 002 | `excluded_repositories` を追加し、`encrypted_token` を NULL 許可へ変更 |
-| 003 | `/issues`・`/assign` 専用の除外配列を追加。既存カラムにコメントを付与 |
+| 001 | `user_settings` を作成。PAT・除外設定・最新の設定チャンネルを保存 |
+| 002 | `/issues` / `/assign` で使う通知チャンネルを保持する `user_notification_channels` を作成 |
 
 ---
 
@@ -113,7 +133,7 @@ SELECT guild_id, channel_id, user_id,
        excluded_assign_repositories,
        updated_at
 FROM user_settings
-WHERE guild_id = '123' AND channel_id = '456' AND user_id = '789';
+WHERE guild_id = '123' AND user_id = '789';
 
 -- ギルド内の登録統計
 SELECT guild_id,

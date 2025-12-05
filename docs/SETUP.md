@@ -75,13 +75,11 @@ volumes:
 ```bash
 export DATABASE_URL="postgresql://bot:bot_password@localhost:5432/github_bot"
 psql $DATABASE_URL -f migrations/001_create_user_settings.sql
-psql $DATABASE_URL -f migrations/002_add_excluded_repositories.sql
-psql $DATABASE_URL -f migrations/003_add_command_specific_excluded_repositories.sql
+psql $DATABASE_URL -f migrations/002_create_user_notification_channels.sql
 ```
 
-- `001` : `user_settings` テーブル作成
-- `002` : 除外リポジトリ配列と `encrypted_token` の NULL 許可
-- `003` : `/issues` 用と `/assign` 用の除外配列を追加 (`excluded_repositories` は互換目的で残存)
+- `001` : `user_settings` テーブル作成（PAT と除外設定をすべて格納）
+- `002` : 通知チャンネル専用テーブル `user_notification_channels` を作成
 
 ---
 
