@@ -10,4 +10,4 @@ CREATE TABLE IF NOT EXISTS user_settings (
     PRIMARY KEY (guild_id, user_id)
 );
 
-CREATE INDEX idx_user_settings_guild ON user_settings(guild_id);
+CREATE INDEX IF NOT EXISTS idx_user_settings_guild ON user_settings(guild_id);

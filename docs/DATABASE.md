@@ -92,7 +92,8 @@ CREATE TABLE user_notification_channels (
 ```
 migrations/
 ├── 001_create_user_settings.sql
-└── 002_create_user_notification_channels.sql
+├── 002_create_user_notification_channels.sql
+└── 003_add_dependabot_settings.sql
 ```
 
 実行例:
@@ -100,6 +101,7 @@ migrations/
 ```bash
 psql $DATABASE_URL -f migrations/001_create_user_settings.sql
 psql $DATABASE_URL -f migrations/002_create_user_notification_channels.sql
+psql $DATABASE_URL -f migrations/003_add_dependabot_settings.sql
 ```
 
 ### 変更履歴
@@ -108,6 +110,7 @@ psql $DATABASE_URL -f migrations/002_create_user_notification_channels.sql
 |----------|------|
 | 001 | `user_settings` を作成。PAT・除外設定・最新の設定チャンネルを保存 |
 | 002 | `/issues` / `/assign` で使う通知チャンネルを保持する `user_notification_channels` を作成 |
+| 003 | `/dependabot` 用除外リポジトリ列と通知チャンネルスコープを追加 |
 
 ---
 
