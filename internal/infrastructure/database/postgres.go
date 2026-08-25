@@ -29,14 +29,16 @@ func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entit
 			excluded_repositories,
 			excluded_issues_repositories,
 			excluded_assign_repositories,
+			excluded_dependabot_repositories,
 			updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (guild_id, user_id)
 		DO UPDATE SET encrypted_token = COALESCE(EXCLUDED.encrypted_token, user_settings.encrypted_token),
 		              excluded_repositories = COALESCE(EXCLUDED.excluded_repositories, user_settings.excluded_repositories),
 		              excluded_issues_repositories = COALESCE(EXCLUDED.excluded_issues_repositories, user_settings.excluded_issues_repositories),
 		              excluded_assign_repositories = COALESCE(EXCLUDED.excluded_assign_repositories, user_settings.excluded_assign_repositories),
+		              excluded_dependabot_repositories = COALESCE(EXCLUDED.excluded_dependabot_repositories, user_settings.excluded_dependabot_repositories),
 		              channel_id = EXCLUDED.channel_id,
 		              updated_at = EXCLUDED.updated_at
 	`
@@ -48,6 +50,7 @@ func (r *PostgresUserSettingRepository) Save(ctx context.Context, setting *entit
 		nullArrayIfNil(setting.ExcludedRepositories),
 		nullArrayIfNil(setting.ExcludedIssuesRepositories),
 		nullArrayIfNil(setting.ExcludedAssignRepositories),
+		nullArrayIfNil(setting.ExcludedDependabotRepositories),
 		setting.UpdatedAt,
 	)
 	return err
@@ -79,7 +82,7 @@ func ensureEmptyArrayNotNil(arr []string) []string {
 
 func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, guildID, userID string) (*entity.UserSetting, error) {
 	query := `
-		SELECT guild_id, user_id, channel_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, updated_at
+		SELECT guild_id, user_id, channel_id, encrypted_token, excluded_repositories, excluded_issues_repositories, excluded_assign_repositories, excluded_dependabot_repositories, updated_at
 		FROM user_settings
 		WHERE guild_id = $1 AND user_id = $2
 	`
@@ -93,6 +96,7 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 		pq.Array(&setting.ExcludedRepositories),
 		pq.Array(&setting.ExcludedIssuesRepositories),
 		pq.Array(&setting.ExcludedAssignRepositories),
+		pq.Array(&setting.ExcludedDependabotRepositories),
 		&setting.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -107,6 +111,7 @@ func (r *PostgresUserSettingRepository) FindByGuildAndUser(ctx context.Context, 
 	setting.ExcludedRepositories = ensureEmptyArrayNotNil(setting.ExcludedRepositories)
 	setting.ExcludedIssuesRepositories = ensureEmptyArrayNotNil(setting.ExcludedIssuesRepositories)
 	setting.ExcludedAssignRepositories = ensureEmptyArrayNotNil(setting.ExcludedAssignRepositories)
+	setting.ExcludedDependabotRepositories = ensureEmptyArrayNotNil(setting.ExcludedDependabotRepositories)
 
 	if err := r.populateNotificationChannels(ctx, &setting); err != nil {
 		return nil, err
@@ -185,6 +190,9 @@ func (r *PostgresUserSettingRepository) populateNotificationChannels(ctx context
 	}
 	if ch, ok := channels["assign"]; ok {
 		setting.NotificationAssignChannelID = ch
+	}
+	if ch, ok := channels["dependabot"]; ok {
+		setting.NotificationDependabotChannelID = ch
 	}
 
 	return nil

@@ -21,6 +21,7 @@ Discord から GitHub Issues を横断検索できるスラッシュコマンド
 | `/setting` | PAT 登録、`/issues` 用除外リスト、`/assign` 用除外リストをモーダルで編集 |
 | `/issues repository:<owner/repo|owner|all>` | 対象リポジトリのオープン Issue を取得。`owner` のみを指定するとそのユーザー/Organization の全リポジトリ、`all` はアクセス可能な全リポジトリを対象にします |
 | `/assign` | 自分に割り当てられたオープン Issue を取得 |
+| `/dependabot` | Dependabot が作成したオープン PR を取得 |
 
 詳細なパラメータやレスポンス形式は [`docs/API.md`](docs/API.md) を参照してください。
 
@@ -50,6 +51,7 @@ docker-compose up -d
 export DATABASE_URL="postgresql://bot:bot_password@localhost:5432/github_bot"
 psql $DATABASE_URL -f migrations/001_create_user_settings.sql
 psql $DATABASE_URL -f migrations/002_create_user_notification_channels.sql
+psql $DATABASE_URL -f migrations/003_add_dependabot_settings.sql
 
 # 5. 環境変数を設定
 cp .env.example .env
@@ -90,6 +92,8 @@ migrations/          # SQL マイグレーション
 各層の責務や処理フローは [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) にまとめています。
 
 ## ドキュメント
+
+依存関係の更新は GitHub Dependabot で管理しています。Go modules と GitHub Actions を毎週月曜日に確認し、更新PRを作成します。
 
 - [`docs/SETUP.md`](docs/SETUP.md) - 詳細なセットアップ手順
 - [`docs/API.md`](docs/API.md) - スラッシュコマンド仕様

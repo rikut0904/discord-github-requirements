@@ -4,9 +4,10 @@ import "time"
 
 // Discord Modal IDs
 const (
-	ModalIDToken         = "token_modal"
-	ModalIDExcludeIssues = "exclude_issues_modal"
-	ModalIDExcludeAssign = "exclude_assign_modal"
+	ModalIDToken             = "token_modal"
+	ModalIDExcludeIssues     = "exclude_issues_modal"
+	ModalIDExcludeAssign     = "exclude_assign_modal"
+	ModalIDExcludeDependabot = "exclude_dependabot_modal"
 )
 
 // Discord Input IDs
@@ -17,8 +18,9 @@ const (
 
 // Command Types
 const (
-	CommandTypeIssues = "issues"
-	CommandTypeAssign = "assign"
+	CommandTypeIssues     = "issues"
+	CommandTypeAssign     = "assign"
+	CommandTypeDependabot = "dependabot"
 )
 
 // User Messages - Success

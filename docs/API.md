@@ -9,6 +9,7 @@ Bot が公開するスラッシュコマンドの仕様をまとめています�
 | `/setting` | PAT と除外リポジトリの登録 | `action` (必須) |
 | `/issues` | 指定範囲のオープン Issue を取得 | `repository` (必須) |
 | `/assign` | 自分に割り当てられた Issue を取得 | なし |
+| `/dependabot` | Dependabot が作成したオープン PR を取得 | なし |
 
 ---
 
@@ -20,7 +21,7 @@ Bot が公開するスラッシュコマンドの仕様をまとめています�
 
 | 名前 | 型 | 必須 | 説明 |
 |------|----|------|------|
-| `action` | string | ✅ | 実行する設定操作。`token` / `exclude_issues` / `exclude_assign` |
+| `action` | string | ✅ | 実行する設定操作。`token` / `exclude_issues` / `exclude_assign` / `exclude_dependabot` |
 
 ### `action: token` – PAT 登録
 
@@ -46,6 +47,10 @@ Bot が公開するスラッシュコマンドの仕様をまとめています�
 ### `action: exclude_assign` – `/assign` 用除外リスト
 
 `exclude_issues` と同じ形式で、`/assign` コマンドの結果にのみ適用されます。
+
+### `action: exclude_dependabot` – `/dependabot` 用除外リスト
+
+`exclude_issues` と同じ形式で、`/dependabot` の結果にのみ適用されます。
 
 ### バリデーションとレスポンス
 
@@ -101,6 +106,16 @@ Bot が公開するスラッシュコマンドの仕様をまとめています�
 
 - `/setting action:exclude_assign` で登録したパターンが適用されます。
 - Issue が 1 件もない場合は `📭 割り当てられた Issue は見つかりませんでした` を返します。
+
+---
+
+## `/dependabot` – Dependabot PR取得
+
+Dependabot が作成したオープンPRをGitHub Search APIで取得します。
+
+- `/setting action:exclude_dependabot` で指定したリポジトリは除外されます。
+- `/setting action:notification_channel notification_scope:dependabot` で通知先を設定できます。
+- `all` を指定すると `/issues`・`/assign`・`/dependabot` の通知先を同じチャンネルに設定できます。
 
 ---
 
