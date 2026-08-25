@@ -93,6 +93,8 @@ migrations/          # SQL マイグレーション
 
 ## ドキュメント
 
+依存関係の更新は GitHub Dependabot で管理しています。Go modules と GitHub Actions を毎週月曜日に確認し、更新PRを作成します。
+
 - [`docs/SETUP.md`](docs/SETUP.md) - 詳細なセットアップ手順
 - [`docs/API.md`](docs/API.md) - スラッシュコマンド仕様
 - [`docs/DATABASE.md`](docs/DATABASE.md) - スキーマとマイグレーション
