@@ -76,10 +76,12 @@ volumes:
 export DATABASE_URL="postgresql://bot:bot_password@localhost:5432/github_bot"
 psql $DATABASE_URL -f migrations/001_create_user_settings.sql
 psql $DATABASE_URL -f migrations/002_create_user_notification_channels.sql
+psql $DATABASE_URL -f migrations/003_add_dependabot_settings.sql
 ```
 
 - `001` : `user_settings` テーブル作成（PAT と除外設定をすべて格納）
 - `002` : 通知チャンネル専用テーブル `user_notification_channels` を作成
+- `003` : `/dependabot` 用除外リポジトリ列と通知チャンネルスコープを追加
 
 ---
 
@@ -94,6 +96,7 @@ cp .env.example .env
 | 変数 | 説明 |
 |------|------|
 | `DISCORD_TOKEN` | Discord Developer Portal で取得した Bot Token |
+| `DISCORD_GUILD_ID` | ローカル開発時のDiscordサーバーID。設定するとスラッシュコマンドが即時反映されます |
 | `DATABASE_URL` | PostgreSQL への接続文字列 |
 | `ENCRYPTION_KEY` | 32 バイトの AES キー。`openssl rand -hex 16` で生成可能 |
 

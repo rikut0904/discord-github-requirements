@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -27,6 +28,9 @@ func NewDiscordHandler(settingUsecase *usecase.SettingUsecase, issuesUsecase *us
 }
 
 func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
+	// Guild IDを指定した場合はローカル開発向けに即時反映されるサーバーコマンドとして登録する。
+	// 未指定時は従来どおりグローバルコマンドとして登録する。
+	guildID := os.Getenv("DISCORD_GUILD_ID")
 	commands := []*discordgo.ApplicationCommand{
 		{
 			Name:        "setting",
@@ -42,6 +46,7 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 						{Name: "通知チャンネル設定", Value: "notification_channel"},
 						{Name: "/issues用 除外リポジトリ設定", Value: "exclude_issues"},
 						{Name: "/assign用 除外リポジトリ設定", Value: "exclude_assign"},
+						{Name: "/dependabot用 除外リポジトリ設定", Value: "exclude_dependabot"},
 					},
 				},
 				{
@@ -53,6 +58,7 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 						{Name: "all (共通)", Value: "all"},
 						{Name: "issues のみ", Value: "issues"},
 						{Name: "assign のみ", Value: "assign"},
+						{Name: "dependabot のみ", Value: "dependabot"},
 						{Name: "確認", Value: "confirm"},
 						{Name: "解除", Value: "clear"},
 					},
@@ -62,6 +68,10 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 		{
 			Name:        "assign",
 			Description: "自分に割り当てられた Issue を取得します",
+		},
+		{
+			Name:        "dependabot",
+			Description: "Dependabot が作成したオープン PR を取得します",
 		},
 		{
 			Name:        "issues",
@@ -78,7 +88,7 @@ func (h *DiscordHandler) RegisterCommands(s *discordgo.Session) error {
 	}
 
 	for _, cmd := range commands {
-		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
+		_, err := s.ApplicationCommandCreate(s.State.User.ID, guildID, cmd)
 		if err != nil {
 			return fmt.Errorf("failed to create command %s: %w", cmd.Name, err)
 		}
@@ -102,6 +112,8 @@ func (h *DiscordHandler) handleCommand(s *discordgo.Session, i *discordgo.Intera
 		h.handleSettingCommand(s, i)
 	case "assign":
 		h.handleAssignCommand(s, i)
+	case "dependabot":
+		h.handleDependabotCommand(s, i)
 	case "issues":
 		h.handleIssuesCommand(s, i)
 	}
@@ -136,6 +148,8 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 			h.handleNotificationChannelSetting(s, i, CommandTypeIssues)
 		case CommandTypeAssign:
 			h.handleNotificationChannelSetting(s, i, CommandTypeAssign)
+		case CommandTypeDependabot:
+			h.handleNotificationChannelSetting(s, i, CommandTypeDependabot)
 		default:
 			h.handleNotificationChannelSetting(s, i, "all")
 		}
@@ -143,6 +157,8 @@ func (h *DiscordHandler) handleSettingCommand(s *discordgo.Session, i *discordgo
 		h.showExcludeModal(s, i, CommandTypeIssues)
 	case "exclude_assign":
 		h.showExcludeModal(s, i, CommandTypeAssign)
+	case "exclude_dependabot":
+		h.showExcludeModal(s, i, CommandTypeDependabot)
 	default:
 		h.respondWithError(s, i, "❌ 未対応のアクションです。")
 	}
@@ -169,8 +185,10 @@ func (h *DiscordHandler) handleNotificationChannelSetting(s *discordgo.Session, 
 		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を /issues 用通知チャンネルに設定しました。", channelID)
 	case CommandTypeAssign:
 		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を /assign 用通知チャンネルに設定しました。", channelID)
+	case CommandTypeDependabot:
+		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を /dependabot 用通知チャンネルに設定しました。", channelID)
 	default:
-		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を通知チャンネルとして設定しました（/issues・/assign共通）。", channelID)
+		message = fmt.Sprintf("✅ このチャンネル (<#%s>) を通知チャンネルとして設定しました（/issues・/assign・/dependabot共通）。", channelID)
 	}
 
 	h.respondWithSuccess(s, i, message)
@@ -190,20 +208,23 @@ func (h *DiscordHandler) handleNotificationChannelConfirm(s *discordgo.Session, 
 	}
 
 	var (
-		commonChannel string
-		issuesChannel string
-		assignChannel string
+		commonChannel     string
+		issuesChannel     string
+		assignChannel     string
+		dependabotChannel string
 	)
 
 	if setting != nil {
 		commonChannel = setting.NotificationChannelID
 		issuesChannel = setting.NotificationChannelForIssues()
 		assignChannel = setting.NotificationChannelForAssign()
+		dependabotChannel = setting.NotificationChannelForDependabot()
 	}
 
-	message := fmt.Sprintf("📋 通知チャンネル設定状況:\n- /issues: %s\n- /assign: %s\n- 共通(旧設定): %s",
+	message := fmt.Sprintf("📋 通知チャンネル設定状況:\n- /issues: %s\n- /assign: %s\n- /dependabot: %s\n- 共通(旧設定): %s",
 		formatChannelMention(issuesChannel),
 		formatChannelMention(assignChannel),
+		formatChannelMention(dependabotChannel),
 		formatChannelMention(commonChannel),
 	)
 
@@ -271,6 +292,9 @@ func (h *DiscordHandler) showExcludeModal(s *discordgo.Session, i *discordgo.Int
 	if commandType == CommandTypeIssues {
 		title = "/issues用 除外リポジトリ設定"
 		customID = ModalIDExcludeIssues
+	} else if commandType == CommandTypeDependabot {
+		title = "/dependabot用 除外リポジトリ設定"
+		customID = ModalIDExcludeDependabot
 	} else {
 		title = "/assign用 除外リポジトリ設定"
 		customID = ModalIDExcludeAssign
@@ -311,6 +335,8 @@ func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.In
 		h.handleExcludeModalSubmit(s, i, CommandTypeIssues)
 	case ModalIDExcludeAssign:
 		h.handleExcludeModalSubmit(s, i, CommandTypeAssign)
+	case ModalIDExcludeDependabot:
+		h.handleExcludeModalSubmit(s, i, CommandTypeDependabot)
 	}
 }
 
@@ -717,6 +743,55 @@ func (h *DiscordHandler) handleAssignCommand(s *discordgo.Session, i *discordgo.
 	h.sendEmbedsToChannel(s, notificationChannelID, content, embeds)
 }
 
+func (h *DiscordHandler) handleDependabotCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+	defer cancel()
+
+	h.respondDeferred(s, i)
+	notificationChannelID, _, err := h.getNotificationChannelForCommand(ctx, s, i, CommandTypeDependabot)
+	if err != nil {
+		return
+	}
+	pullRequests, rateLimit, err := h.issuesUsecase.GetDependabotPullRequests(ctx, i.GuildID, i.Member.User.ID)
+	if err != nil {
+		h.respondEditWithError(s, i, h.formatIssuesFetchError(err))
+		return
+	}
+	if len(pullRequests) == 0 {
+		h.respondEditWithError(s, i, "📭 Dependabot のオープン PR は見つかりませんでした")
+		return
+	}
+
+	content := "✅ Dependabot のオープン PR を取得しました。"
+	if rateLimit != nil && rateLimit.Remaining < RateLimitWarningThreshold {
+		content += fmt.Sprintf("\n"+MsgRateLimitWarning, rateLimit.Remaining, rateLimit.ResetAt.Format("15:04:05"))
+	}
+	if i.ChannelID != notificationChannelID {
+		content += fmt.Sprintf(" 結果は <#%s> に送信されました。", notificationChannelID)
+	}
+
+	// 初回の応答を完了メッセージに置き換え、Embed本体は通常メッセージとして送る。
+	h.respondEditWithError(s, i, content)
+	embeds := make([]*discordgo.MessageEmbed, 0, len(pullRequests))
+	for _, pullRequest := range pullRequests {
+		repositoryName := "不明"
+		if pullRequest.Repository != nil {
+			repositoryName = pullRequest.Repository.FullName
+		}
+		embeds = append(embeds, &discordgo.MessageEmbed{
+			Title: fmt.Sprintf("#%d %s", pullRequest.Number, pullRequest.Title),
+			URL:   pullRequest.HTMLURL,
+			Color: ColorGitHubSuccess,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Repository", Value: repositoryName, Inline: true},
+				{Name: "Author", Value: pullRequest.Author.Login, Inline: true},
+				{Name: "Updated", Value: pullRequest.UpdatedAt.Format(time.RFC3339), Inline: true},
+			},
+		})
+	}
+	h.sendEmbedsToChannel(s, notificationChannelID, "", embeds)
+}
+
 // getNotificationChannelForCommand はユーザー設定を取得し、指定されたコマンドタイプの通知チャンネルIDを返します。
 // 設定が存在しない、または通知チャンネルが設定されていない場合はエラーを返します。
 func (h *DiscordHandler) getNotificationChannelForCommand(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) (string, *entity.UserSetting, error) {
@@ -739,6 +814,9 @@ func (h *DiscordHandler) getNotificationChannelForCommand(ctx context.Context, s
 	case "assign":
 		notificationChannelID = setting.NotificationChannelForAssign()
 		errorMsg = "❌ /assign用通知チャンネルが設定されていません。`/setting action:notification_channel notification_scope:assign` で設定してください。"
+	case "dependabot":
+		notificationChannelID = setting.NotificationChannelForDependabot()
+		errorMsg = "❌ /dependabot用通知チャンネルが設定されていません。`/setting action:notification_channel notification_scope:dependabot` で設定してください。"
 	default:
 		h.respondEditWithError(s, i, "❌ 不明なコマンドタイプです")
 		return "", nil, fmt.Errorf("unknown command type: %s", commandType)

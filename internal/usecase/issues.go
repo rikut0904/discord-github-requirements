@@ -34,9 +34,9 @@ type RepositoryError struct {
 
 // IssuesResult はIssue取得結果とエラー情報を保持します
 type IssuesResult struct {
-	Issues       []github.Issue
-	RateLimit    *github.RateLimitInfo
-	FailedRepos  []RepositoryError
+	Issues      []github.Issue
+	RateLimit   *github.RateLimitInfo
+	FailedRepos []RepositoryError
 }
 
 // getSettingAndToken はユーザー設定を取得し、トークンを復号化して両方を返します
@@ -84,6 +84,26 @@ func (u *IssuesUsecase) GetAssignedIssues(ctx context.Context, guildID, userID s
 	// Apply excluded repositories filter for assign command
 	filteredIssues := u.filterExcludedRepositories(issues, setting.ExcludedAssignRepositories)
 	return filteredIssues, rateLimit, nil
+}
+
+func (u *IssuesUsecase) GetDependabotPullRequests(ctx context.Context, guildID, userID string) ([]github.DependabotPullRequest, *github.RateLimitInfo, error) {
+	setting, token, err := u.getSettingAndToken(ctx, guildID, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pullRequests, rateLimit, err := github.NewClient(token).GetAllDependabotPullRequests()
+	if err != nil {
+		return nil, rateLimit, err
+	}
+
+	filtered := make([]github.DependabotPullRequest, 0, len(pullRequests))
+	for _, pullRequest := range pullRequests {
+		if pullRequest.Repository == nil || !isRepositoryExcluded(pullRequest.Repository.FullName, setting.ExcludedDependabotRepositories) {
+			filtered = append(filtered, pullRequest)
+		}
+	}
+	return filtered, rateLimit, nil
 }
 
 func (u *IssuesUsecase) GetRepositoryIssues(ctx context.Context, guildID, userID, owner, repo string) ([]github.Issue, *github.RateLimitInfo, error) {

@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,6 +40,20 @@ type User struct {
 
 type Repository struct {
 	FullName string `json:"full_name"`
+}
+
+type DependabotPullRequest struct {
+	Number        int         `json:"number"`
+	Title         string      `json:"title"`
+	HTMLURL       string      `json:"html_url"`
+	UpdatedAt     time.Time   `json:"updated_at"`
+	RepositoryURL string      `json:"repository_url"`
+	Author        User        `json:"user"`
+	Repository    *Repository `json:"-"`
+}
+
+type pullRequestSearchResponse struct {
+	Items []DependabotPullRequest `json:"items"`
 }
 
 type RateLimitInfo struct {
@@ -122,6 +139,112 @@ func (c *Client) GetAllAssignedIssues() ([]Issue, *RateLimitInfo, error) {
 	})
 }
 
+// GetDependabotPullRequests はDependabotが作成したオープンPRを検索します。
+func (c *Client) GetDependabotPullRequests(page, perPage int) ([]DependabotPullRequest, *RateLimitInfo, error) {
+	query := url.Values{}
+	query.Set("q", "is:pr is:open author:app/dependabot")
+	query.Set("page", strconv.Itoa(page))
+	query.Set("per_page", strconv.Itoa(perPage))
+
+	var result pullRequestSearchResponse
+	rateLimit, err := c.doRequest("https://api.github.com/search/issues?"+query.Encode(), &result)
+	if err != nil {
+		return nil, rateLimit, err
+	}
+
+	for idx := range result.Items {
+		result.Items[idx].Repository = repositoryFromAPIURL(result.Items[idx].RepositoryURL)
+	}
+	return result.Items, rateLimit, nil
+}
+
+func (c *Client) GetAllDependabotPullRequests() ([]DependabotPullRequest, *RateLimitInfo, error) {
+	repositories, rateLimit, err := c.GetAllUserRepositories()
+	if err != nil {
+		return nil, rateLimit, err
+	}
+
+	type repositoryResult struct {
+		pullRequests []DependabotPullRequest
+		rateLimit    *RateLimitInfo
+		err          error
+	}
+	results := make(chan repositoryResult, len(repositories))
+	semaphore := make(chan struct{}, 10)
+	var waitGroup sync.WaitGroup
+
+	for _, repository := range repositories {
+		repository := repository
+		parts := strings.SplitN(repository.FullName, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		waitGroup.Add(1)
+		go func(owner, repo, fullName string) {
+			defer waitGroup.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			pullRequests, repositoryRateLimit, err := c.GetAllRepositoryPullRequests(owner, repo)
+			if err != nil {
+				results <- repositoryResult{rateLimit: repositoryRateLimit, err: err}
+				return
+			}
+			filtered := make([]DependabotPullRequest, 0, len(pullRequests))
+			for _, pullRequest := range pullRequests {
+				if strings.EqualFold(pullRequest.Author.Login, "dependabot[bot]") {
+					pullRequest.Repository = &Repository{FullName: fullName}
+					filtered = append(filtered, pullRequest)
+				}
+			}
+			results <- repositoryResult{pullRequests: filtered, rateLimit: repositoryRateLimit}
+		}(parts[0], parts[1], repository.FullName)
+	}
+
+	waitGroup.Wait()
+	close(results)
+
+	var dependabotPullRequests []DependabotPullRequest
+	for result := range results {
+		if result.err != nil {
+			return nil, result.rateLimit, result.err
+		}
+		if result.rateLimit != nil {
+			rateLimit = result.rateLimit
+		}
+		dependabotPullRequests = append(dependabotPullRequests, result.pullRequests...)
+	}
+
+	return dependabotPullRequests, rateLimit, nil
+}
+
+func (c *Client) GetRepositoryPullRequests(owner, repo string, page, perPage int) ([]DependabotPullRequest, *RateLimitInfo, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls?state=open&page=%d&per_page=%d", owner, repo, page, perPage)
+
+	var pullRequests []DependabotPullRequest
+	rateLimit, err := c.doRequest(url, &pullRequests)
+	return pullRequests, rateLimit, err
+}
+
+func (c *Client) GetAllRepositoryPullRequests(owner, repo string) ([]DependabotPullRequest, *RateLimitInfo, error) {
+	return collectAllPages(func(page int) ([]DependabotPullRequest, *RateLimitInfo, error) {
+		return c.GetRepositoryPullRequests(owner, repo, page, maxPerPage)
+	})
+}
+
+func repositoryFromAPIURL(repositoryURL string) *Repository {
+	const prefix = "https://api.github.com/repos/"
+	if !strings.HasPrefix(repositoryURL, prefix) {
+		return nil
+	}
+	fullName := strings.TrimSuffix(strings.TrimPrefix(repositoryURL, prefix), "/")
+	if fullName == "" {
+		return nil
+	}
+	return &Repository{FullName: fullName}
+}
+
 func (c *Client) GetAllRepositoryIssues(owner, repo string) ([]Issue, *RateLimitInfo, error) {
 	return collectAllPages(func(page int) ([]Issue, *RateLimitInfo, error) {
 		return c.GetRepositoryIssues(owner, repo, page, maxPerPage)
@@ -182,7 +305,6 @@ func (c *Client) GetAllSpecificUserRepositories(username string) ([]Repository, 
 		return c.GetSpecificUserRepositories(username, page, maxPerPage)
 	})
 }
-
 
 func parseRateLimit(resp *http.Response) *RateLimitInfo {
 	remaining, _ := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining"))

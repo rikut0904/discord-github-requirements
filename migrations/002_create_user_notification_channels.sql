@@ -5,5 +5,5 @@ CREATE TABLE IF NOT EXISTS user_notification_channels (
     channel_id VARCHAR(32) NOT NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     PRIMARY KEY (guild_id, user_id, scope),
-    CHECK (scope IN ('all', 'issues', 'assign'))
+    CHECK (scope IN ('all', 'issues', 'assign', 'dependabot'))
 );

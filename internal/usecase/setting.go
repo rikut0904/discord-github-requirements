@@ -39,9 +39,9 @@ func ensureSettingWithChannel(setting *entity.UserSetting, guildID, channelID, u
 }
 
 // validateIssuesOrAssignType はcommandTypeが"issues"または"assign"であることを検証します
-func validateIssuesOrAssignType(commandType string) error {
-	if commandType != "issues" && commandType != "assign" {
-		return fmt.Errorf("invalid commandType: %s (must be 'issues' or 'assign')", commandType)
+func validateSettingCommandType(commandType string) error {
+	if commandType != "issues" && commandType != "assign" && commandType != "dependabot" {
+		return fmt.Errorf("invalid commandType: %s (must be 'issues', 'assign' or 'dependabot')", commandType)
 	}
 	return nil
 }
@@ -87,9 +87,9 @@ func (u *SettingUsecase) GetUserSetting(ctx context.Context, guildID, userID str
 }
 
 func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, channelID, userID, commandType, notificationChannelID string) error {
-	// Allow commandType "", "all", "issues", "assign"
-	if commandType != "" && commandType != "all" && commandType != "issues" && commandType != "assign" {
-		return fmt.Errorf("invalid commandType: %s (must be '', 'all', 'issues' or 'assign')", commandType)
+	// Allow commandType "", "all", "issues", "assign", "dependabot"
+	if commandType != "" && commandType != "all" && commandType != "issues" && commandType != "assign" && commandType != "dependabot" {
+		return fmt.Errorf("invalid commandType: %s", commandType)
 	}
 
 	setting, err := u.repo.FindByGuildAndUser(ctx, guildID, userID)
@@ -105,9 +105,11 @@ func (u *SettingUsecase) SaveNotificationChannel(ctx context.Context, guildID, c
 		scopes = []string{"issues"}
 	case "assign":
 		scopes = []string{"assign"}
+	case "dependabot":
+		scopes = []string{"dependabot"}
 	default:
-		// 共通設定: issues と assign スコープのみを設定（all は deprecated のため除外）
-		scopes = []string{"issues", "assign"}
+		// 共通設定は全コマンドの専用スコープへ保存する。
+		scopes = []string{"issues", "assign", "dependabot"}
 	}
 
 	for _, scope := range scopes {
@@ -126,7 +128,7 @@ func (u *SettingUsecase) ClearNotificationChannels(ctx context.Context, guildID,
 }
 
 func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, channelID, userID string, repositories []string, commandType string) error {
-	if err := validateIssuesOrAssignType(commandType); err != nil {
+	if err := validateSettingCommandType(commandType); err != nil {
 		return err
 	}
 
@@ -141,6 +143,8 @@ func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, 
 		setting.ExcludedIssuesRepositories = repositories
 	} else if commandType == "assign" {
 		setting.ExcludedAssignRepositories = repositories
+	} else {
+		setting.ExcludedDependabotRepositories = repositories
 	}
 
 	setting.UpdatedAt = time.Now()
@@ -149,7 +153,7 @@ func (u *SettingUsecase) SaveExcludedRepositories(ctx context.Context, guildID, 
 }
 
 func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, userID string, commandType string) ([]string, error) {
-	if err := validateIssuesOrAssignType(commandType); err != nil {
+	if err := validateSettingCommandType(commandType); err != nil {
 		return nil, err
 	}
 
@@ -165,6 +169,8 @@ func (u *SettingUsecase) GetExcludedRepositories(ctx context.Context, guildID, u
 		return setting.ExcludedIssuesRepositories, nil
 	} else if commandType == "assign" {
 		return setting.ExcludedAssignRepositories, nil
+	} else if commandType == "dependabot" {
+		return setting.ExcludedDependabotRepositories, nil
 	}
 
 	return []string{}, nil
