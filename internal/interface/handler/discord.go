@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -314,7 +315,17 @@ func (h *DiscordHandler) handleModalSubmit(s *discordgo.Session, i *discordgo.In
 }
 
 func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	token := h.getModalInputValue(i, InputIDToken)
+	// GitHub API の検証と DB 保存には 3 秒以上かかることがあるため、
+	// 先に Discord の応答を確定させてから処理を実行する。
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral},
+	}); err != nil {
+		log.Printf("token modal: failed to defer interaction response: %v", err)
+		return
+	}
+
+	token := strings.TrimSpace(h.getModalInputValue(i, InputIDToken))
 
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 	defer cancel()
@@ -324,6 +335,7 @@ func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discord
 
 	err := h.settingUsecase.SaveToken(ctx, guildID, channelID, userID, token)
 	if err != nil {
+		log.Printf("token modal: failed to save token for guild=%s user=%s: %v", guildID, userID, err)
 		var message string
 		if ghErr, ok := err.(*github.GitHubError); ok {
 			message = fmt.Sprintf(MsgTokenValidationFailed, ghErr.Message)
@@ -331,23 +343,19 @@ func (h *DiscordHandler) handleTokenModalSubmit(s *discordgo.Session, i *discord
 			message = MsgTokenSaveFailed
 		}
 
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: message,
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
+		if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &message}); err != nil {
+			log.Printf("token modal: failed to edit error response: %v", err)
+		}
 		return
 	}
 
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: MsgTokenSaved,
-			Flags:   discordgo.MessageFlagsEphemeral,
-		},
-	})
+	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: stringPtr(MsgTokenSaved)}); err != nil {
+		log.Printf("token modal: failed to edit success response: %v", err)
+	}
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func (h *DiscordHandler) handleExcludeModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate, commandType string) {
